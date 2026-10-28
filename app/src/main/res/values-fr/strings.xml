@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Abyss TV</string>
+    <string name="nav_home">Accueil</string>
+    <string name="nav_movies">Films</string>
+    <string name="nav_series">Séries</string>
+    <string name="nav_discover">Découvrir</string>
+    <string name="nav_apps">Apps</string>
+    <string name="settings">Paramètres</string>
+    <string name="search">Rechercher</string>
+    <string name="search_placeholder">Rechercher films, séries, Jellyfin &amp; Seer…</string>
+    <string name="search_recent_title">Recherches récentes</string>
+    <string name="search_clear_history">Effacer</string>
+    <string name="settings_tooltip">Paramètres Abyss</string>
+    <string name="find_remote">Localiser la télécommande</string>
+
+    <!-- Spotlight Hero Banner -->
+    <string name="badge_featured_movie">FILM À LA UNE</string>
+    <string name="badge_featured_series">SÉRIE À LA UNE</string>
+    <string name="badge_series">SÉRIE</string>
+    <string name="badge_movie">FILM</string>
+    <string name="hero_eyebrow_resume">▶ REPRENDRE LA LECTURE</string>
+    <string name="hero_eyebrow_trending">✦ TENDANCES CINÉMA &amp; SÉRIES</string>
+    <string name="cta_play_stream">Lire</string>
+    <string name="cta_watch">Regarder</string>
+    <string name="cta_resume">Reprendre</string>
+    <string name="cta_more_details">Détails</string>
+    <string name="cta_pin_to_watchlist">Ajouter à ma liste</string>
+    <string name="cta_pinned_in_watchlist">Dans ma liste</string>
+    <string name="cta_request_on_seer">Demander sur Seer</string>
+
+    <!-- Home & Category Rows -->
+    <string name="row_continue_watching">Reprendre</string>
+    <string name="row_pinned_apps">Applications épinglées</string>
+    <string name="row_trending_movies">Films tendances</string>
+    <string name="row_trending_series">Séries tendances</string>
+    <string name="row_seer_trending">Découvertes &amp; Tendances</string>
+    <string name="row_seer_popular_movies">Films populaires</string>
+    <string name="row_seer_popular_tv">Séries populaires</string>
+    <string name="row_seer_requests">Demandes récentes</string>
+    <string name="row_all_installed_apps">Toutes les applications</string>
+    <string name="row_hidden_apps">Applications masquées</string>
+    <string name="row_watchlist">Ma Liste</string>
+    <string name="app_hint_long_press">Maintenez OK pour le menu</string>
+    <string name="see_all">Voir tout →</string>
+    <string name="see_all_caps">VOIR TOUT</string>
+    <string name="browse_all">Tout explorer</string>
+    <string name="row_requests_downloads">Demandes &amp; Téléchargements (Seer)</string>
+    <string name="row_recent_movies">Films Récents (Jellyfin)</string>
+    <string name="row_recent_shows">Séries Récentes (Jellyfin)</string>
+    <string name="row_all_movies">Tous les Films</string>
+    <string name="row_all_series">Toutes les Séries</string>
+    <string name="row_top_rated_movies">Films les Mieux Notés</string>
+    <string name="row_recently_added_movies">Derniers Ajouts (Films)</string>
+    <string name="row_all_jf_movies">Tous les Films Jellyfin</string>
+    <string name="row_top_rated_shows">Séries les Mieux Notées</string>
+    <string name="row_recently_added_shows">Derniers Ajouts (Séries)</string>
+    <string name="row_all_jf_series">Toutes les Séries Jellyfin</string>
+
+    <!-- App Context Sheet -->
+    <string name="app_menu_title">Options de l\'application</string>
+    <string name="app_action_launch">Ouvrir l\'application</string>
+    <string name="app_action_pin">Épingler à l\'accueil</string>
+    <string name="app_action_unpin">Désépingler de l\'accueil</string>
+    <string name="app_action_move_left">Déplacer vers la gauche</string>
+    <string name="app_action_move_right">Déplacer vers la droite</string>
+    <string name="app_action_hide">Masquer de la liste</string>
+    <string name="app_action_unhide">Réafficher l\'application</string>
+    <string name="app_action_system_info">Informations Android</string>
+    <string name="app_action_close">Annuler</string>
+
+    <!-- Media Details Modal -->
+    <string name="details_play">Lancer la lecture</string>
+    <string name="details_play_external">Lire avec un lecteur externe</string>
+    <string name="details_request">Demander sur Seer</string>
+    <string name="details_close">Fermer</string>
+    <string name="details_status_available">Disponible dans Jellyfin</string>
+    <string name="details_status_pending">En attente d\'approbation</string>
+    <string name="details_status_processing">Téléchargement en cours…</string>
+    <string name="details_status_not_requested">Non disponible dans la bibliothèque</string>
+    <string name="downloading_in_progress">Téléchargement en cours</string>
+    <string name="download_eta">~%1$s restant</string>
+    <string name="download_processing">En cours de traitement par les gestionnaires de téléchargement</string>
+
+    <!-- Settings Drawer -->
+    <string name="settings_header_title">Paramètres Abyss TV</string>
+    <string name="settings_header_subtitle">Client Jellyfin, Demandes Seer &amp; Système Android TV</string>
+    <string name="settings_section_quick_system">Raccourcis Système &amp; Appareil</string>
+    <string name="sys_android_settings">Paramètres Android TV</string>
+    <string name="sys_android_settings_sub">Ouvrir le menu de réglages natif de la TV</string>
+    <string name="sys_wifi_network">Wi-Fi &amp; Réseau</string>
+    <string name="sys_wifi_network_sub">Gérer la connexion Internet</string>
+    <string name="sys_bluetooth_remotes">Télécommandes &amp; Accessoires</string>
+    <string name="sys_bluetooth_remotes_sub">Associer télécommandes, manettes, casques</string>
+    <string name="sys_display_sound">Affichage &amp; Audio</string>
+    <string name="sys_display_sound_sub">HDR, résolution, HDMI-CEC, son surround</string>
+    <string name="sys_manage_apps">Gérer les applications</string>
+    <string name="sys_manage_apps_sub">Autorisations, stockage, détails</string>
+    <string name="sys_default_launcher">Sélection du lanceur par défaut</string>
+    <string name="sys_default_launcher_sub">Définir Abyss TV comme écran d\'accueil</string>
+
+    <string name="settings_section_jellyfin">Serveur Jellyfin</string>
+    <string name="jf_description">Connectez votre serveur Jellyfin pour profiter de vos Films, Séries, Reprises et Suite directe avec synchronisation instantanée.</string>
+    <string name="jf_server_url_label">URL du serveur Jellyfin (ex: http://192.168.1.100:8096)</string>
+    <string name="jf_username_label">Identifiant (Username)</string>
+    <string name="jf_password_label">Mot de passe</string>
+    <string name="jf_save_and_connect_btn">Se connecter &amp; Synchroniser Jellyfin</string>
+    <string name="jf_connecting_text">Connexion à Jellyfin en cours…</string>
+    <string name="jf_player_pref_label">Mode lecteur vidéo</string>
+    <string name="jf_stats_template">Jellyfin : %1$d Films • %2$d Séries connectés</string>
+
+    <string name="settings_section_seer">Seer (Jellyseerr / Overseerr)</string>
+    <string name="seer_description">Connectez Jellyseerr ou Overseerr pour explorer les sorties à venir, voir les tendances et demander des films ou séries en 1 clic.</string>
+    <string name="seer_server_url_label">URL du serveur Seer (ex: http://192.168.1.100:5055)</string>
+    <string name="seer_api_key_label">Clé API Seer (API Key)</string>
+    <string name="seer_save_and_test_btn">Enregistrer &amp; Tester la connexion</string>
+    <string name="seer_testing_text">Connexion à Seer en cours…</string>
+    <string name="seer_status_connected">Connecté à Seer</string>
+
+    <string name="settings_section_appearance">Apparence &amp; Interface</string>
+    <string name="appearance_language_label">Langue de l\'interface</string>
+    <string name="appearance_theme_label">Couleur d\'accentuation</string>
+    <string name="appearance_auto_rotate_hero">Rotation auto de la bannière</string>
+    <string name="appearance_show_hidden_apps">Afficher les apps masquées</string>
+
+    <!-- Episode Context Menu & Actions -->
+    <string name="episode_action_mark_watched">Marquer comme vu</string>
+    <string name="episode_action_mark_unwatched">Marquer comme non vu</string>
+    <string name="episode_action_mark_all_previous_watched">Marquer les épisodes précédents comme vus</string>
+    <string name="episode_action_cancel">Annuler</string>
+
+    <string name="msg_sync_success">Bibliothèque Jellyfin synchronisée avec succès !</string>
+    <string name="msg_sync_error">Échec de synchronisation avec Jellyfin.</string>
+    <string name="msg_app_pinned">Application épinglée à l\'accueil</string>
+    <string name="msg_app_unpinned">Application désépinglée de l\'accueil</string>
+    <string name="msg_app_hidden">Application masquée</string>
+    <string name="msg_app_unhidden">Application restaurée</string>
+    <string name="msg_seer_request_success">Demande envoyée avec succès sur Seer !</string>
+    <string name="msg_seer_request_error">Échec de l\'envoi de la demande sur Seer.</string>
+    <string name="msg_marked_watched">%1$s marqué comme vu</string>
+    <string name="msg_marked_unwatched">%1$s marqué comme non vu</string>
+    <string name="msg_marked_single_watched">Marqué comme vu</string>
+    <string name="msg_marked_single_unwatched">Marqué comme non vu</string>
+    <string name="msg_all_prev_watched">Tous les épisodes précédents marqués comme vus</string>
+    <string name="msg_series_complete">Fin de la série • Tous les épisodes visionnés</string>
+    <string name="msg_playing_next">Lecture : %1$s</string>
+    <string name="msg_seer_connected">Connecté à Seer (%1$s) !</string>
+    <string name="msg_seer_failed">Échec de connexion à Seer.</string>
+    <string name="msg_removed_continue">Retiré de Reprendre</string>
+    <string name="msg_added_watchlist">Ajouté à ma liste</string>
+    <string name="msg_removed_watchlist">Retiré de ma liste</string>
+
+    <!-- Series Modal -->
+    <string name="series_seasons_episodes_tag">SÉRIE • SAISONS &amp; ÉPISODES</string>
+    <string name="series_seasons_episodes_count">%1$d Saisons • %2$d Épisodes</string>
+    <string name="series_continue_pos">Continuer %1$s • %2$s</string>
+    <string name="series_continue_title">Continuer %1$s • %2$s</string>
+    <string name="series_play_title">Lecture %1$s • %2$s</string>
+    <string name="series_restart_ep">Recommencer %1$s</string>
+    <string name="series_resume_at">Reprendre à %1$s</string>
+    <string name="series_season_episode_fmt">Saison %1$d • Épisode %2$d</string>
+    <string name="series_loading_episodes">Chargement des saisons et épisodes…</string>
+    <string name="series_no_episodes">Aucun épisode trouvé pour cette série.</string>
+    <string name="series_seasons_label">Saisons</string>
+    <string name="series_hold_ok_hint">Appui long sur OK : options de l\'épisode</string>
+    <string name="badge_watched_caps">VU</string>
+    <string name="badge_watched">Vu</string>
+
+    <!-- Common Dialog / Player Strings -->
+    <string name="btn_back">Retour</string>
+    <string name="btn_retry">Réessayer</string>
+    <string name="btn_external_player">Lecteur externe (VLC)</string>
+    <string name="btn_close">Fermer</string>
+    <string name="btn_exit">Quitter</string>
+    <string name="player_pause">Pause</string>
+    <string name="player_next">Suivant • %1$s</string>
+    <string name="ends_at_fmt">Fin à %1$s</string>
+    <string name="subtitles_off">Désactivé (Aucun sous-titre)</string>
+    <string name="subtitles_title">Sous-titres</string>
+    <string name="audio_tracks_title">Pistes Audio</string>
+    <string name="no_audio_tracks">Aucune piste audio supplémentaire détectée.</string>
+    <string name="default_audio_track">Piste Audio %1$d</string>
+    <string name="default_subtitle_track">Sous-titres %1$d</string>
+    <string name="restart_from_beginning">Recommencer du début</string>
+
+    <!-- Search Screen -->
+    <string name="search_suggested">Suggestions &amp; Recommandations</string>
+    <string name="search_popular_movies">Films Populaires</string>
+    <string name="search_popular_series">Séries Populaires</string>
+    <string name="search_results_movies">Films (%1$d)</string>
+    <string name="search_results_series">Séries (%1$d)</string>
+    <string name="search_results_seer">Découverte &amp; Seer (%1$d)</string>
+    <string name="search_results_apps">Applications (%1$d)</string>
+    <string name="search_no_results">Aucun résultat trouvé pour \"%1$s\"</string>
+
+    <!-- Catalog Screen -->
+    <string name="catalog_total_items">%1$d éléments au total</string>
+    <string name="catalog_filter_placeholder">Filtrer dans la liste…</string>
+    <!-- Material 3 Expressive Section Titles -->
+    <string name="section_connection">Connexion</string>
+    <string name="section_player_prefs">Lecture &amp; Préférences</string>
+    <string name="section_library_status">État de la synchronisation</string>
+    <string name="section_basics">Général</string>
+    <string name="section_app_drawer">Tiroir d\'applications</string>
+    <string name="section_system">Système</string>
+    <string name="hide_default">Masquer (Défaut)</string>
+    <string name="show_action">Afficher</string>
+    <string name="series_episodes_and_seasons">Épisodes &amp; Saisons</string>
+    <string name="mark_series_watched">Marquer la série comme vue</string>
+    <string name="remove_from_continue">Retirer de \"Reprendre\"</string>
+    <string name="remove_from_watchlist">Retirer de Ma Liste</string>
+    <string name="no_synopsis_available">Aucun synopsis disponible.</string>
+</resources>
