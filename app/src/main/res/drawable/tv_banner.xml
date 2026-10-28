@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <!-- Deep Abyss Void background -->
+    <path
+        android:fillColor="#06070B"
+        android:pathData="M0,0h320v180h-320z" />
+    <!-- Subtle Abyss Violet & Cyan ambient glow shapes -->
+    <path
+        android:fillAlpha="0.35"
+        android:fillColor="#7C5CFF"
+        android:pathData="M60,90a70,70 0,1 0,140 0a70,70 0,1 0,-140 0z" />
+    <path
+        android:fillAlpha="0.25"
+        android:fillColor="#38BDF8"
+        android:pathData="M140,90a65,65 0,1 0,130 0a65,65 0,1 0,-130 0z" />
+    <!-- Frosted glass pill frame -->
+    <path
+        android:fillAlpha="0.8"
+        android:fillColor="#111420"
+        android:strokeWidth="1.5"
+        android:strokeColor="#40FFFFFF"
+        android:pathData="M48,54 L272,54 A36,36 0 0,1 308,90 L308,90 A36,36 0 0,1 272,126 L48,126 A36,36 0 0,1 12,90 L12,90 A36,36 0 0,1 48,54 Z" />
+    <!-- Glowing Abyss Orb / Play Emblem -->
+    <path
+        android:fillColor="#7C5CFF"
+        android:pathData="M62,90a18,18 0,1 0,36 0a18,18 0,1 0,-36 0z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M75,81 L75,99 L90,90 Z" />
+    <!-- Stylized ABYSS Bars -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M116,78h92v8h-92z" />
+    <path
+        android:fillColor="#94A3B8"
+        android:pathData="M116,94h136v6h-136z" />
+</vector>
