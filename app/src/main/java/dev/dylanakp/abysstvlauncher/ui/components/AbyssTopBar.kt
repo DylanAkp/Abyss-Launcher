@@ -74,6 +74,29 @@ fun AbyssTopBar(
             .fillMaxWidth()
             .padding(horizontal = 32.dp, vertical = 14.dp)
     ) {
+        // Left: Digital Clock
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .clip(RoundedCornerShape(50))
+                .background(AbyssPillGlass)
+                .border(1.dp, AbyssBorderHairline, RoundedCornerShape(50))
+                .padding(horizontal = 14.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = currentTime,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp,
+                    fontSize = 13.sp
+                ),
+                color = AbyssTextPrimary,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+
         // Center: Floating Frosted Pill Group for Navigation
         Row(
             modifier = Modifier
@@ -106,7 +129,7 @@ fun AbyssTopBar(
             }
         }
 
-        // Right: Floating Frosted Pill Group for Search & Digital Clock
+        // Right: Floating Frosted Pill Group for Actions (Remote, Search, Settings)
         Row(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
@@ -133,8 +156,10 @@ fun AbyssTopBar(
                 onNavigateDown = onNavigateDown,
                 onClick = onToggleSearch
             )
-            TopBarClockPill(
-                timeText = currentTime,
+            TopBarActionPill(
+                icon = AbyssIconType.SETTINGS,
+                contentDescription = stringResource(R.string.settings_header_title),
+                isSelected = false,
                 onNavigateDown = onNavigateDown,
                 onClick = onOpenLauncherSettings
             )
@@ -274,62 +299,6 @@ private fun TopBarActionPill(
             type = icon,
             color = iconColor,
             size = 13.dp
-        )
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun TopBarClockPill(
-    timeText: String,
-    onNavigateDown: (() -> Unit)? = null,
-    onClick: () -> Unit
-) {
-    var isFocused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.06f else 1f,
-        animationSpec = tween(120),
-        label = "clockPillScale"
-    )
-
-    Box(
-        modifier = Modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(RoundedCornerShape(50))
-            .background(if (isFocused) Color.White else Color.Transparent)
-            .border(
-                width = 1.dp,
-                color = if (isFocused) Color.White else Color.Transparent,
-                shape = RoundedCornerShape(50)
-            )
-            .onFocusChanged { isFocused = it.isFocused }
-            .onPreviewKeyEvent { event ->
-                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
-                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_DOWN
-                ) {
-                    onNavigateDown?.invoke()
-                    true
-                } else {
-                    false
-                }
-            }
-            .combinedClickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 5.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = timeText,
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.5.sp,
-                fontSize = 13.sp
-            ),
-            color = if (isFocused) Color.Black else AbyssTextPrimary,
-            maxLines = 1,
-            softWrap = false
         )
     }
 }
