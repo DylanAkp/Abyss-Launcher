@@ -10,6 +10,11 @@ enum class AppLanguage(val code: String, val label: String) {
     EN("en", "English")
 }
 
+enum class TemperatureUnit(val symbol: String, val label: String, val localizedLabel: String) {
+    CELSIUS("°C", "Celsius (°C)", "Celsius (°C)"),
+    FAHRENHEIT("°F", "Fahrenheit (°F)", "Fahrenheit (°F)")
+}
+
 enum class AbyssNavTab {
     HOME,
     MOVIES,

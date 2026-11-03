@@ -136,6 +136,23 @@ class LauncherPreferences(context: Context) {
             prefs.edit().putStringSet("watchlist_ids", value).apply()
         }
 
+    var weatherCity: String
+        get() = prefs.getString("weather_city", "Paris") ?: "Paris"
+        set(value) {
+            prefs.edit().putString("weather_city", value.trim().ifBlank { "Paris" }).apply()
+        }
+
+    var temperatureUnit: dev.dylanakp.abysstvlauncher.model.TemperatureUnit
+        get() {
+            val raw = prefs.getString("temp_unit", dev.dylanakp.abysstvlauncher.model.TemperatureUnit.CELSIUS.name)
+                ?: dev.dylanakp.abysstvlauncher.model.TemperatureUnit.CELSIUS.name
+            return runCatching { dev.dylanakp.abysstvlauncher.model.TemperatureUnit.valueOf(raw) }
+                .getOrDefault(dev.dylanakp.abysstvlauncher.model.TemperatureUnit.CELSIUS)
+        }
+        set(value) {
+            prefs.edit().putString("temp_unit", value.name).apply()
+        }
+
     var searchHistory: List<String>
         get() {
             val raw = prefs.getString("search_history", "") ?: ""
