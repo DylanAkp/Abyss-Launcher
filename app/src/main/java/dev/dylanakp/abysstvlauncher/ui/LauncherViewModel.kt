@@ -17,6 +17,8 @@ import dev.dylanakp.abysstvlauncher.data.PlaybackHistoryRepository
 import dev.dylanakp.abysstvlauncher.data.SeerRepository
 import dev.dylanakp.abysstvlauncher.data.SystemAppHelper
 import dev.dylanakp.abysstvlauncher.data.TmdbRepository
+import dev.dylanakp.abysstvlauncher.data.WeatherInfo
+import dev.dylanakp.abysstvlauncher.data.WeatherRepository
 import dev.dylanakp.abysstvlauncher.model.AbyssAccentPreset
 import dev.dylanakp.abysstvlauncher.model.AbyssNavTab
 import dev.dylanakp.abysstvlauncher.model.AppLanguage
@@ -87,6 +89,9 @@ data class LauncherUiState(
     val selectedMediaForMenu: MediaItem? = null,
 
     val isSettingsDrawerOpen: Boolean = false,
+    val weatherCity: String = "Paris",
+    val temperatureUnit: dev.dylanakp.abysstvlauncher.model.TemperatureUnit = dev.dylanakp.abysstvlauncher.model.TemperatureUnit.CELSIUS,
+    val weatherInfo: WeatherInfo? = null,
     val jellyfinConfig: JellyfinConfig = JellyfinConfig(),
     val seerConfig: SeerConfig = SeerConfig(),
     val isSyncingJellyfin: Boolean = false,
@@ -140,6 +145,12 @@ class LauncherViewModel : ViewModel() {
 
         val lang = preferences.language
         applyLanguage(lang)
+
+        val wCity = preferences.weatherCity
+        val tUnit = preferences.temperatureUnit
+        _uiState.update { it.copy(weatherCity = wCity, temperatureUnit = tUnit) }
+        fetchWeather(wCity)
+        startWeatherLoop()
 
         var jfConfig = preferences.jellyfinConfig
         val defaultUser = BuildConfig.DEFAULT_JELLYFIN_USER
@@ -1242,6 +1253,40 @@ class LauncherViewModel : ViewModel() {
             val epCode = "S${targetEpisode.seasonNumber.toString().padStart(2, '0')}E${targetEpisode.episodeNumber.toString().padStart(2, '0')}"
             val resId = if (isCurrentlyWatched) R.string.msg_marked_unwatched else R.string.msg_marked_watched
             showStatusMessage(getString(resId, epCode), 2500L)
+        }
+    }
+
+    fun setWeatherCity(newCity: String) {
+        val city = newCity.trim().ifBlank { "Paris" }
+        prefs?.weatherCity = city
+        _uiState.update { it.copy(weatherCity = city) }
+        WeatherRepository.clearCache()
+        fetchWeather(city)
+    }
+
+    fun setTemperatureUnit(unit: dev.dylanakp.abysstvlauncher.model.TemperatureUnit) {
+        prefs?.temperatureUnit = unit
+        _uiState.update { it.copy(temperatureUnit = unit) }
+    }
+
+    private var weatherJob: Job? = null
+
+    private fun fetchWeather(city: String) {
+        viewModelScope.launch {
+            val info = WeatherRepository.getWeather(city)
+            _uiState.update { it.copy(weatherInfo = info) }
+        }
+    }
+
+    private fun startWeatherLoop() {
+        weatherJob?.cancel()
+        weatherJob = viewModelScope.launch {
+            while (isActive) {
+                delay(30 * 60 * 1000L)
+                val city = prefs?.weatherCity ?: "Paris"
+                val info = WeatherRepository.getWeather(city)
+                _uiState.update { it.copy(weatherInfo = info) }
+            }
         }
     }
 
