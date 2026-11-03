@@ -52,7 +52,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dylanakp.abysstvlauncher.R
+import dev.dylanakp.abysstvlauncher.data.WeatherInfo
 import dev.dylanakp.abysstvlauncher.model.AppLanguage
+import dev.dylanakp.abysstvlauncher.model.TemperatureUnit
 import dev.dylanakp.abysstvlauncher.model.JellyfinConfig
 import dev.dylanakp.abysstvlauncher.model.PlayerPreference
 import dev.dylanakp.abysstvlauncher.model.SeerConfig
@@ -75,13 +77,18 @@ fun SettingsDrawer(
     isSyncing: Boolean,
     currentLanguage: AppLanguage,
     showHiddenApps: Boolean,
+    weatherCity: String = "Paris",
+    temperatureUnit: TemperatureUnit = TemperatureUnit.CELSIUS,
+    weatherInfo: WeatherInfo? = null,
     onClose: () -> Unit,
     onOpenAndroidSettings: () -> Unit,
     onSaveAndConnectJellyfin: (String, String, String) -> Unit,
     onSaveAndTestSeer: (String, String) -> Unit,
     onSelectPlayerPreference: (PlayerPreference) -> Unit,
     onSelectLanguage: (AppLanguage) -> Unit,
-    onToggleShowHiddenApps: (Boolean) -> Unit
+    onToggleShowHiddenApps: (Boolean) -> Unit,
+    onUpdateWeatherCity: (String) -> Unit = {},
+    onSelectTemperatureUnit: (TemperatureUnit) -> Unit = {}
 ) {
     AnimatedVisibility(
         visible = isOpen,
@@ -285,8 +292,13 @@ fun SettingsDrawer(
                                 AppearanceSectionContent(
                                     currentLanguage = currentLanguage,
                                     showHiddenApps = showHiddenApps,
+                                    weatherCity = weatherCity,
+                                    temperatureUnit = temperatureUnit,
+                                    weatherInfo = weatherInfo,
                                     onSelectLanguage = onSelectLanguage,
-                                    onToggleShowHiddenApps = onToggleShowHiddenApps
+                                    onToggleShowHiddenApps = onToggleShowHiddenApps,
+                                    onUpdateWeatherCity = onUpdateWeatherCity,
+                                    onSelectTemperatureUnit = onSelectTemperatureUnit
                                 )
                             }
                         }
@@ -534,8 +546,13 @@ private fun SeerSectionContent(
 private fun AppearanceSectionContent(
     currentLanguage: AppLanguage,
     showHiddenApps: Boolean,
+    weatherCity: String,
+    temperatureUnit: TemperatureUnit,
+    weatherInfo: WeatherInfo?,
     onSelectLanguage: (AppLanguage) -> Unit,
-    onToggleShowHiddenApps: (Boolean) -> Unit
+    onToggleShowHiddenApps: (Boolean) -> Unit,
+    onUpdateWeatherCity: (String) -> Unit,
+    onSelectTemperatureUnit: (TemperatureUnit) -> Unit
 ) {
     val scrollState = rememberScrollState()
     val isFrench = java.util.Locale.getDefault().language.startsWith("fr")
@@ -571,6 +588,60 @@ private fun AppearanceSectionContent(
                     icon = AbyssIconType.GLOBE,
                     isSelected = currentLanguage == AppLanguage.EN,
                     onClick = { onSelectLanguage(AppLanguage.EN) }
+                )
+            }
+        }
+
+        M3ExpressiveGroup(title = if (isFrench) "MÉTÉO (ÉCRAN D'ACCUEIL)" else "WEATHER (HOME SCREEN)") {
+            var inputCity by remember(weatherCity) { mutableStateOf(weatherCity) }
+            val currentPreview = weatherInfo?.let { "${it.cityName} : ${it.displayString(temperatureUnit)}" } ?: "$weatherCity (chargement…)"
+
+            Text(
+                text = if (isFrench) "Affichage météo en haut à gauche : $currentPreview"
+                       else "Weather preview on top-left: $currentPreview",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = Color(0xFFBDC1C6)
+            )
+
+            SettingsGlassInputField(
+                label = if (isFrench) "Ville pour la météo" else "City for weather",
+                value = inputCity,
+                onValueChange = { inputCity = it },
+                placeholder = "Paris"
+            )
+
+            SettingsPrimaryActionButton(
+                label = if (isFrench) "Enregistrer la ville" else "Save City",
+                onClick = { onUpdateWeatherCity(inputCity.trim()) }
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = if (isFrench) "Unité de température" else "Temperature Unit",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    letterSpacing = 0.5.sp
+                ),
+                color = Color(0xFF8E918F)
+            )
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                GoogleTvRadioRow(
+                    title = "Celsius (°C)",
+                    subtitle = if (isFrench) "Affichage de la température en degrés Celsius" else "Displays temperature in degrees Celsius",
+                    isSelected = temperatureUnit == TemperatureUnit.CELSIUS,
+                    onClick = { onSelectTemperatureUnit(TemperatureUnit.CELSIUS) }
+                )
+                GoogleTvRadioRow(
+                    title = "Fahrenheit (°F)",
+                    subtitle = if (isFrench) "Affichage de la température en degrés Fahrenheit" else "Displays temperature in degrees Fahrenheit",
+                    isSelected = temperatureUnit == TemperatureUnit.FAHRENHEIT,
+                    onClick = { onSelectTemperatureUnit(TemperatureUnit.FAHRENHEIT) }
                 )
             }
         }

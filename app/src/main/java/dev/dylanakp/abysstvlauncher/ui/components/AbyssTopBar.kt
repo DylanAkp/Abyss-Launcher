@@ -56,6 +56,7 @@ fun AbyssTopBar(
     onOpenAndroidSettings: () -> Unit,
     onOpenLauncherSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    weatherText: String? = null,
     isSearchActive: Boolean = false,
     activeTabRequester: FocusRequester? = null,
     onNavigateDown: (() -> Unit)? = null
@@ -74,27 +75,57 @@ fun AbyssTopBar(
             .fillMaxWidth()
             .padding(horizontal = 32.dp, vertical = 14.dp)
     ) {
-        // Left: Digital Clock
+        // Left: Floating Frosted Pill Group for Clock & Weather
         Row(
             modifier = Modifier
                 .align(Alignment.CenterStart)
                 .clip(RoundedCornerShape(50))
                 .background(AbyssPillGlass)
                 .border(1.dp, AbyssBorderHairline, RoundedCornerShape(50))
-                .padding(horizontal = 14.dp, vertical = 7.dp),
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = currentTime,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.5.sp,
-                    fontSize = 13.sp
-                ),
-                color = AbyssTextPrimary,
-                maxLines = 1,
-                softWrap = false
-            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(50))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = currentTime,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.5.sp,
+                        fontSize = 13.sp
+                    ),
+                    color = AbyssTextPrimary,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+
+            if (!weatherText.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(50))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = weatherText,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
+                        ),
+                        color = AbyssTextPrimary,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
         }
 
         // Center: Floating Frosted Pill Group for Navigation

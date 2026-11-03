@@ -791,6 +791,7 @@ fun MainScreen(
             selectedTab = state.selectedTab,
             isSeerConfigured = state.seerConfig.isConfigured,
             isSearchActive = state.isSearchActive,
+            weatherText = state.weatherInfo?.displayString(state.temperatureUnit),
             activeTabRequester = topBarFocusRequester,
             onNavigateDown = onNavigateDownFromTopBar,
             onSelectTab = { viewModel.selectTab(it) },
@@ -916,6 +917,9 @@ fun MainScreen(
             isSyncing = state.isSyncingJellyfin,
             currentLanguage = state.language,
             showHiddenApps = state.showHiddenApps,
+            weatherCity = state.weatherCity,
+            temperatureUnit = state.temperatureUnit,
+            weatherInfo = state.weatherInfo,
             onClose = { viewModel.setSettingsDrawerOpen(false) },
             onOpenAndroidSettings = { SystemAppHelper.openAndroidSettings(context) },
             onSaveAndConnectJellyfin = { srv, user, pass ->
@@ -926,7 +930,9 @@ fun MainScreen(
             },
             onSelectPlayerPreference = { viewModel.setPlayerPreference(it) },
             onSelectLanguage = { viewModel.setLanguage(it) },
-            onToggleShowHiddenApps = { viewModel.setShowHiddenApps(it) }
+            onToggleShowHiddenApps = { viewModel.setShowHiddenApps(it) },
+            onUpdateWeatherCity = { viewModel.setWeatherCity(it) },
+            onSelectTemperatureUnit = { viewModel.setTemperatureUnit(it) }
         )
     }
 }
