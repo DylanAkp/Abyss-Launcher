@@ -241,6 +241,7 @@ fun MainScreen(
     val topHomeRowKey = remember(
         state.pinnedApps.isNotEmpty(),
         continueWatchingFiltered.isNotEmpty(),
+        state.seerConfig.isConfigured,
         state.seerRequests.isNotEmpty(),
         state.homeMovies.isNotEmpty(),
         state.homeSeries.isNotEmpty(),
@@ -249,10 +250,10 @@ fun MainScreen(
         when {
             state.pinnedApps.isNotEmpty() -> "favoriteAppsRow"
             continueWatchingFiltered.isNotEmpty() -> "continueWatchingRow"
-            state.seerRequests.isNotEmpty() -> "homeSeerRequestsRow"
+            state.seerConfig.isConfigured && state.seerRequests.isNotEmpty() -> "homeSeerRequestsRow"
             state.homeMovies.isNotEmpty() -> "homeMoviesRow"
             state.homeSeries.isNotEmpty() -> "homeSeriesRow"
-            state.seerTrending.isNotEmpty() -> "homeSeerTrendingRow"
+            state.seerConfig.isConfigured && state.seerTrending.isNotEmpty() -> "homeSeerTrendingRow"
             else -> ""
         }
     }
@@ -495,7 +496,7 @@ fun MainScreen(
                         }
 
                         // Seer Active Requests & Downloads Row (if any)
-                        if (state.seerRequests.isNotEmpty()) {
+                        if (state.seerConfig.isConfigured && state.seerRequests.isNotEmpty()) {
                             item(key = "homeSeerRequestsRow", contentType = "media_poster_row") {
                                 val isTopRow = topHomeRowKey == "homeSeerRequestsRow"
                                 MediaRow(
@@ -549,7 +550,7 @@ fun MainScreen(
                         }
 
                         // Seer Trending / Discover Row
-                        if (state.seerTrending.isNotEmpty()) {
+                        if (state.seerConfig.isConfigured && state.seerTrending.isNotEmpty()) {
                             item(key = "homeSeerTrendingRow", contentType = "media_poster_row") {
                                 val isTopRow = topHomeRowKey == "homeSeerTrendingRow"
                                 val title = stringResource(R.string.row_seer_trending)
@@ -899,6 +900,7 @@ fun MainScreen(
         // Media Detail Modal with Play and Seer Request support
         MediaDetailModal(
             item = state.selectedMediaForDetails,
+            isSeerConfigured = state.seerConfig.isConfigured,
             onDismiss = { viewModel.closeMediaDetails() },
             onPlay = { item ->
                 viewModel.closeMediaDetails()

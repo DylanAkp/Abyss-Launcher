@@ -52,6 +52,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun MediaDetailModal(
     item: MediaItem?,
+    isSeerConfigured: Boolean = false,
     onDismiss: () -> Unit,
     onPlay: (MediaItem) -> Unit,
     onRequestOnSeer: ((MediaItem) -> Unit)? = null
@@ -71,8 +72,8 @@ fun MediaDetailModal(
             } catch (_: Exception) {}
         }
 
-        val isAvailable = item.streamUrl.isNotBlank() || item.seerStatus == SeerMediaStatus.AVAILABLE
-        val canRequest = !isAvailable && item.tmdbId != null && item.seerStatus != SeerMediaStatus.PROCESSING && item.seerStatus != SeerMediaStatus.PENDING_APPROVAL
+        val isAvailable = item.streamUrl.isNotBlank() || item.jellyfinId.isNotBlank() || (isSeerConfigured && item.seerStatus == SeerMediaStatus.AVAILABLE)
+        val canRequest = isSeerConfigured && !isAvailable && item.tmdbId != null && item.seerStatus != SeerMediaStatus.PROCESSING && item.seerStatus != SeerMediaStatus.PENDING_APPROVAL
 
         Box(
             modifier = Modifier
@@ -141,7 +142,7 @@ fun MediaDetailModal(
                                     )
                                 }
 
-                                if (item.seerStatus != SeerMediaStatus.UNKNOWN) {
+                                if (isSeerConfigured && item.seerStatus != SeerMediaStatus.UNKNOWN) {
                                     val (statusBg, statusFg) = when (item.seerStatus) {
                                         SeerMediaStatus.AVAILABLE -> Pair(Color(0x3310B981), Color(0xFF6EE7B7))
                                         SeerMediaStatus.PROCESSING -> Pair(Color(0x3306B6D4), Color(0xFF67E8F9))
@@ -217,11 +218,11 @@ fun MediaDetailModal(
                                     lineHeight = 17.sp
                                 ),
                                 color = AbyssTextSecondary,
-                                maxLines = if (item.seerStatus == SeerMediaStatus.PROCESSING || item.downloadProgress != null) 3 else 5
+                                maxLines = if (isSeerConfigured && (item.seerStatus == SeerMediaStatus.PROCESSING || item.downloadProgress != null)) 3 else 5
                             )
 
                             // Active Seer Download Telemetry
-                            if (item.seerStatus == SeerMediaStatus.PROCESSING || item.downloadProgress != null) {
+                            if (isSeerConfigured && (item.seerStatus == SeerMediaStatus.PROCESSING || item.downloadProgress != null)) {
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Box(
                                     modifier = Modifier
