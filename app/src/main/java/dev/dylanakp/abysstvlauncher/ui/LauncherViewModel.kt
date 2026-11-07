@@ -372,7 +372,7 @@ class LauncherViewModel : ViewModel() {
     fun onMediaItemClicked(context: Context, item: MediaItem) {
         val state = _uiState.value
 
-        // 1. Series -> If available in Jellyfin, open Episode Picker. Otherwise open Details / Seer modal
+        // 1. Series -> If available in Jellyfin, open Episode Picker. Otherwise open Details modal
         if (item.category == MediaCategory.SERIES) {
             val matchedSeries = state.series.firstOrNull {
                 it.id == item.id ||
@@ -380,11 +380,12 @@ class LauncherViewModel : ViewModel() {
                     TmdbRepository.titlesMatchSafely(it.title, item.title) ||
                     TmdbRepository.titlesMatchSafely(it.localizedTitle, item.localizedTitle)
             }
-            if (matchedSeries != null && matchedSeries.jellyfinId.isNotBlank()) {
-                openSeriesEpisodePicker(matchedSeries)
-                return
-            } else if (item.jellyfinId.isNotBlank()) {
-                openSeriesEpisodePicker(item)
+            val target = matchedSeries ?: if (state.jellyfinConfig.isConfigured && (item.jellyfinId.isNotBlank() || item.id.isNotBlank())) {
+                item.copy(jellyfinId = item.jellyfinId.ifBlank { item.id })
+            } else null
+
+            if (target != null) {
+                openSeriesEpisodePicker(target)
                 return
             } else {
                 openMediaDetails(item)
@@ -403,54 +404,63 @@ class LauncherViewModel : ViewModel() {
             }
             if (matched != null && matched.streamUrl.isNotBlank()) {
                 playableMovieItem = matched
+            } else if (state.jellyfinConfig.isConfigured && (item.jellyfinId.isNotBlank() || item.id.isNotBlank())) {
+                val jfId = item.jellyfinId.ifBlank { item.id }
+                playableMovieItem = item.copy(
+                    jellyfinId = jfId,
+                    streamUrl = JellyfinRepository.getStreamUrl(state.jellyfinConfig, jfId)
+                )
             }
         }
 
         if (playableMovieItem.streamUrl.isNotBlank()) {
             launchMoviePlayback(context, playableMovieItem)
         } else {
-            // Not yet in Jellyfin -> open Details modal with Seer request action!
             openMediaDetails(item)
         }
     }
 
     private fun launchMoviePlayback(context: Context, item: MediaItem) {
         val state = _uiState.value
+        val safeStreamUrl = JellyfinRepository.sanitizeStreamUrl(item.streamUrl, state.jellyfinConfig)
+        val safeItem = item.copy(streamUrl = safeStreamUrl)
 
         if (state.jellyfinConfig.playerPreference != PlayerPreference.ABYSS_INTERNAL) {
-            val launched = SystemAppHelper.playMediaExternal(context, item, state.jellyfinConfig.playerPreference)
+            val launched = SystemAppHelper.playMediaExternal(context, safeItem, state.jellyfinConfig.playerPreference)
             if (launched) return
         }
 
-        val savedEntry = PlaybackHistoryRepository.getEntry(context, item.id)
+        val savedEntry = PlaybackHistoryRepository.getEntry(context, safeItem.id)
         val savedPos = if (savedEntry != null && savedEntry.progressPercent < 0.95f) {
             savedEntry.positionMs
         } else 0L
 
         val session = PlayerSession(
-            mediaItem = item,
-            streamUrl = item.streamUrl,
-            title = item.title(),
-            subtitle = listOf(item.year, item.groupTitle()).filter { it.isNotBlank() }.joinToString(" • "),
+            mediaItem = safeItem,
+            streamUrl = safeItem.streamUrl,
+            title = safeItem.title(),
+            subtitle = listOf(safeItem.year, safeItem.groupTitle()).filter { it.isNotBlank() }.joinToString(" • "),
             startPositionMs = 0L,
             savedResumePositionMs = savedPos
         )
 
-        // Notify Jellyfin server
+        // Jellyfin playback probe & start report
         viewModelScope.launch(Dispatchers.IO) {
-            JellyfinRepository.reportPlaybackStart(state.jellyfinConfig, item.jellyfinId.ifBlank { item.id }, savedPos)
+            val jfId = safeItem.jellyfinId.ifBlank { safeItem.id }
+            JellyfinRepository.preparePlayback(state.jellyfinConfig, jfId)
+            JellyfinRepository.reportPlaybackStart(state.jellyfinConfig, jfId, savedPos)
         }
 
         if (savedEntry == null) {
             PlaybackHistoryRepository.saveProgress(
                 context = context,
-                itemId = item.id,
+                itemId = safeItem.id,
                 positionMs = 1_000L,
                 durationMs = 7_200_000L,
-                streamUrl = item.streamUrl,
-                title = item.title(),
-                posterUrl = item.posterUrl,
-                backdropUrl = item.backdropUrl.ifBlank { item.posterUrl },
+                streamUrl = safeItem.streamUrl,
+                title = safeItem.title(),
+                posterUrl = safeItem.posterUrl,
+                backdropUrl = safeItem.backdropUrl.ifBlank { safeItem.posterUrl },
                 category = MediaCategory.MOVIE.name
             )
         }
@@ -510,23 +520,27 @@ class LauncherViewModel : ViewModel() {
         nextEpisode: SeriesEpisode?,
         startPositionMs: Long
     ) {
-        val epCode = "S${episode.seasonNumber.toString().padStart(2, '0')}E${episode.episodeNumber.toString().padStart(2, '0')}"
+        val config = _uiState.value.jellyfinConfig
+        val safeStreamUrl = JellyfinRepository.sanitizeStreamUrl(episode.streamUrl, config)
+        val safeEpisode = episode.copy(streamUrl = safeStreamUrl)
+        val epCode = "S${safeEpisode.seasonNumber.toString().padStart(2, '0')}E${safeEpisode.episodeNumber.toString().padStart(2, '0')}"
         val session = PlayerSession(
-            mediaItem = seriesItem.copy(id = episode.id, streamUrl = episode.streamUrl),
-            streamUrl = episode.streamUrl,
+            mediaItem = seriesItem.copy(id = safeEpisode.id, streamUrl = safeEpisode.streamUrl),
+            streamUrl = safeEpisode.streamUrl,
             title = "${seriesItem.title()} — $epCode",
-            subtitle = episode.title,
+            subtitle = safeEpisode.title,
             startPositionMs = 0L,
             savedResumePositionMs = startPositionMs,
             seriesId = seriesItem.id,
-            seasonNumber = episode.seasonNumber,
-            episodeNumber = episode.episodeNumber,
+            seasonNumber = safeEpisode.seasonNumber,
+            episodeNumber = safeEpisode.episodeNumber,
             nextEpisode = nextEpisode
         )
 
-        // Notify Jellyfin server
+        // Jellyfin playback probe & start report
         viewModelScope.launch(Dispatchers.IO) {
-            JellyfinRepository.reportPlaybackStart(_uiState.value.jellyfinConfig, episode.id, startPositionMs)
+            JellyfinRepository.preparePlayback(config, safeEpisode.id)
+            JellyfinRepository.reportPlaybackStart(config, safeEpisode.id, startPositionMs)
         }
 
         appContext?.let { ctx ->
@@ -681,7 +695,19 @@ class LauncherViewModel : ViewModel() {
     }
 
     fun openMediaDetails(item: MediaItem) {
-        _uiState.update { it.copy(selectedMediaForDetails = item) }
+        val config = _uiState.value.jellyfinConfig
+        val jfId = item.jellyfinId.ifBlank { item.id }
+        val resolved = if (item.streamUrl.isBlank() && config.isConfigured && jfId.isNotBlank()) {
+            item.copy(jellyfinId = jfId, streamUrl = JellyfinRepository.getStreamUrl(config, jfId))
+        } else {
+            item.copy(streamUrl = JellyfinRepository.sanitizeStreamUrl(item.streamUrl, config))
+        }
+        if (config.isConfigured && jfId.isNotBlank()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                JellyfinRepository.preparePlayback(config, jfId)
+            }
+        }
+        _uiState.update { it.copy(selectedMediaForDetails = resolved) }
     }
 
     fun closeMediaDetails() {
