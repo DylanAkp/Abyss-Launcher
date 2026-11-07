@@ -199,7 +199,19 @@ object JellyfinRepository {
     fun getStreamUrl(config: JellyfinConfig, itemId: String): String {
         val server = cleanUrl(config.serverUrl)
         val token = config.accessToken
-        return "$server/Videos/$itemId/stream?static=true&api_key=$token"
+        val userId = config.userId
+        val userParam = if (userId.isNotBlank()) "&userId=$userId" else ""
+        return "$server/Videos/$itemId/stream?static=true&api_key=$token$userParam"
+    }
+
+    fun sanitizeStreamUrl(streamUrl: String, config: JellyfinConfig): String {
+        if (streamUrl.isBlank() || config.userId.isBlank()) return streamUrl
+        return if (!streamUrl.contains("userId=")) {
+            if (streamUrl.contains("?")) "$streamUrl&userId=${config.userId}"
+            else "$streamUrl?userId=${config.userId}"
+        } else {
+            streamUrl
+        }
     }
 
     fun getImageUrl(serverUrl: String, itemId: String, isBackdrop: Boolean = false): String {
@@ -287,7 +299,7 @@ object JellyfinRepository {
 
                 val poster = "$server/Items/$id/Images/Primary?fillWidth=400&quality=90"
                 val backdrop = "$server/Items/$id/Images/Backdrop/0?fillWidth=1280&quality=85"
-                val streamUrl = "$server/Videos/$id/stream?static=true&api_key=$token"
+                val streamUrl = "$server/Videos/$id/stream?static=true&api_key=$token&userId=$userId"
 
                 items.add(
                     MediaItem(
@@ -416,7 +428,7 @@ object JellyfinRepository {
                                     synopsis = obj.optString("Overview", ""),
                                     localizedSynopsis = obj.optString("Overview", ""),
                                     qualityBadge = "REPRENDRE",
-                                    streamUrl = "$server/Videos/$id/stream?static=true&api_key=$token",
+                                    streamUrl = "$server/Videos/$id/stream?static=true&api_key=$token&userId=$userId",
                                     posterUrl = "$server/Items/$id/Images/Primary?fillWidth=400&quality=90",
                                     backdropUrl = "$server/Items/$id/Images/Backdrop/0?fillWidth=1280&quality=85",
                                     progressPercent = progress,
@@ -445,7 +457,7 @@ object JellyfinRepository {
                                     synopsis = obj.optString("Overview", ""),
                                     localizedSynopsis = obj.optString("Overview", ""),
                                     qualityBadge = sCode,
-                                    streamUrl = "$server/Videos/$id/stream?static=true&api_key=$token",
+                                    streamUrl = "$server/Videos/$id/stream?static=true&api_key=$token&userId=$userId",
                                     posterUrl = "$server/Items/$targetSeriesId/Images/Primary?fillWidth=400&quality=90",
                                     backdropUrl = "$server/Items/$targetSeriesId/Images/Backdrop/0?fillWidth=1280&quality=85",
                                     progressPercent = progress,
@@ -493,7 +505,7 @@ object JellyfinRepository {
                                 synopsis = obj.optString("Overview", ""),
                                 localizedSynopsis = obj.optString("Overview", ""),
                                 qualityBadge = sCode,
-                                streamUrl = "$server/Videos/$id/stream?static=true&api_key=$token",
+                                streamUrl = "$server/Videos/$id/stream?static=true&api_key=$token&userId=$userId",
                                 posterUrl = "$server/Items/$targetSeriesId/Images/Primary?fillWidth=400&quality=90",
                                 backdropUrl = "$server/Items/$targetSeriesId/Images/Backdrop/0?fillWidth=1280&quality=85",
                                 progressPercent = 0.001f, // Next episode ready to play!
@@ -562,7 +574,7 @@ object JellyfinRepository {
                                     episodeNumber = epNum,
                                     title = epName,
                                     plot = overview,
-                                    streamUrl = "$server/Videos/$epId/stream?static=true&api_key=$token",
+                                    streamUrl = "$server/Videos/$epId/stream?static=true&api_key=$token&userId=$userId",
                                     posterUrl = "$server/Items/$epId/Images/Primary?fillWidth=400&quality=90",
                                     progressPercent = progress,
                                     savedPositionMs = posMs,
@@ -583,6 +595,17 @@ object JellyfinRepository {
             SeriesDetails(seriesItem = seriesItem, seasons = seasonList)
         } catch (_: Exception) {
             null
+        }
+    }
+
+    suspend fun preparePlayback(config: JellyfinConfig, itemId: String): Boolean = withContext(Dispatchers.IO) {
+        val server = cleanUrl(config.serverUrl)
+        val userId = config.userId
+        if (!config.isConfigured || itemId.isBlank() || userId.isBlank()) return@withContext false
+        try {
+            httpGet("$server/Users/$userId/Items/$itemId", config.accessToken) != null
+        } catch (_: Exception) {
+            false
         }
     }
 
