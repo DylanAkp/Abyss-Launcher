@@ -6,6 +6,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.dylanakp.abysstvlauncher.BuildConfig
 import dev.dylanakp.abysstvlauncher.data.AppRepository
+import dev.dylanakp.abysstvlauncher.data.AppUpdate
+import dev.dylanakp.abysstvlauncher.data.AppUpdateRepository
 import dev.dylanakp.abysstvlauncher.data.JellyfinRepository
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatDelegate
@@ -102,7 +104,11 @@ data class LauncherUiState(
     val isSearching: Boolean = false,
     val searchHistory: List<String> = emptyList(),
     val statusBannerMessage: String? = null,
-    val activeCatalogSelection: dev.dylanakp.abysstvlauncher.ui.components.CatalogSelection? = null
+    val activeCatalogSelection: dev.dylanakp.abysstvlauncher.ui.components.CatalogSelection? = null,
+    val pendingUpdate: AppUpdate? = null,
+    val isDownloadingUpdate: Boolean = false,
+    val updateDownloadProgress: Float = 0f,
+    val updateError: String? = null
 ) {
     val activeHeroItem: MediaItem?
         get() = if (spotlightCandidates.isNotEmpty()) {
@@ -251,6 +257,9 @@ class LauncherViewModel : ViewModel() {
                     }
                 } catch (_: Exception) {}
             }
+
+            // 5. Check for app updates on boot
+            checkForUpdates(silent = true)
         }
     }
 
@@ -1520,6 +1529,74 @@ class LauncherViewModel : ViewModel() {
             delay(durationMs)
             _uiState.update {
                 if (it.statusBannerMessage == message) it.copy(statusBannerMessage = null) else it
+            }
+        }
+    }
+
+    fun checkForUpdates(silent: Boolean = false) {
+        viewModelScope.launch {
+            AppUpdateRepository.checkLatestRelease()
+                .onSuccess { update ->
+                    if (update != null) {
+                        _uiState.update {
+                            it.copy(
+                                pendingUpdate = update,
+                                updateError = null,
+                                isDownloadingUpdate = false,
+                                updateDownloadProgress = 0f
+                            )
+                        }
+                    } else if (!silent) {
+                        showStatusMessage(getString(R.string.update_already_latest, BuildConfig.VERSION_NAME))
+                    }
+                }
+                .onFailure {
+                    if (!silent) {
+                        showStatusMessage(getString(R.string.update_check_failed))
+                    }
+                }
+        }
+    }
+
+    fun dismissUpdate() {
+        _uiState.update {
+            it.copy(
+                pendingUpdate = null,
+                isDownloadingUpdate = false,
+                updateDownloadProgress = 0f,
+                updateError = null
+            )
+        }
+    }
+
+    fun downloadAndInstallUpdate(context: Context) {
+        val update = _uiState.value.pendingUpdate ?: return
+        if (_uiState.value.isDownloadingUpdate) return
+
+        _uiState.update {
+            it.copy(
+                isDownloadingUpdate = true,
+                updateDownloadProgress = 0f,
+                updateError = null
+            )
+        }
+        viewModelScope.launch {
+            AppUpdateRepository.downloadApk(context, update.apkUrl) { progress ->
+                _uiState.update { it.copy(updateDownloadProgress = progress) }
+            }.onSuccess { apkFile ->
+                _uiState.update { it.copy(isDownloadingUpdate = false) }
+                AppUpdateRepository.triggerInstall(context, apkFile).onFailure { error ->
+                    _uiState.update {
+                        it.copy(updateError = error.localizedMessage ?: "Installation failed")
+                    }
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isDownloadingUpdate = false,
+                        updateError = error.localizedMessage ?: "Download failed"
+                    )
+                }
             }
         }
     }
