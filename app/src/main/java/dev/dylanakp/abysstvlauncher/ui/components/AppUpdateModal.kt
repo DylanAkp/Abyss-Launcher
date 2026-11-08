@@ -1,5 +1,6 @@
 package dev.dylanakp.abysstvlauncher.ui.components
 
+import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -41,6 +42,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -295,7 +297,16 @@ private fun UpdateModalButton(
                 RoundedCornerShape(12.dp)
             )
             .onFocusChanged { isFocused = it.isFocused }
-            .focusable(enabled)
+            .onPreviewKeyEvent { event ->
+                val native = event.nativeKeyEvent
+                val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                        native.keyCode == KeyEvent.KEYCODE_ENTER ||
+                        native.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+                if (enabled && isSelectKey && native.action == KeyEvent.ACTION_UP) {
+                    onClick()
+                    true
+                } else false
+            }
             .clickable(enabled = enabled) { onClick() }
             .padding(vertical = 12.dp, horizontal = 16.dp),
         contentAlignment = Alignment.Center

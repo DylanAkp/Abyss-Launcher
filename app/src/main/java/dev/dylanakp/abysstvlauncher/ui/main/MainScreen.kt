@@ -936,6 +936,7 @@ fun MainScreen(
             onToggleShowHiddenApps = { viewModel.setShowHiddenApps(it) },
             onUpdateWeatherCity = { viewModel.setWeatherCity(it) },
             onSelectTemperatureUnit = { viewModel.setTemperatureUnit(it) },
+            isCheckingUpdates = state.isCheckingUpdates,
             onCheckForUpdates = { viewModel.checkForUpdates(silent = false) }
         )
 

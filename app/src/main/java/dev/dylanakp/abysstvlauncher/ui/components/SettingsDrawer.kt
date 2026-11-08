@@ -90,6 +90,7 @@ fun SettingsDrawer(
     onToggleShowHiddenApps: (Boolean) -> Unit,
     onUpdateWeatherCity: (String) -> Unit = {},
     onSelectTemperatureUnit: (TemperatureUnit) -> Unit = {},
+    isCheckingUpdates: Boolean = false,
     onCheckForUpdates: () -> Unit = {}
 ) {
     AnimatedVisibility(
@@ -270,8 +271,8 @@ fun SettingsDrawer(
 
                         SettingsSidebarActionButton(
                             label = stringResource(R.string.update_check_button),
-                            subLabel = "v${BuildConfig.VERSION_NAME}",
-                            icon = AbyssIconType.INFO,
+                            subLabel = if (isCheckingUpdates) stringResource(R.string.update_checking) else "v${BuildConfig.VERSION_NAME}",
+                            icon = if (isCheckingUpdates) AbyssIconType.RESTART else AbyssIconType.INFO,
                             onClick = onCheckForUpdates
                         )
                     }

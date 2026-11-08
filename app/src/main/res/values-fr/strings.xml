@@ -221,6 +221,7 @@
     <string name="update_installing">Ouverture de l\'installateur…</string>
     <string name="update_changelog_title">Nouveautés</string>
     <string name="update_check_button">Vérifier les mises à jour</string>
+    <string name="update_checking">Vérification en cours…</string>
     <string name="update_already_latest">Abyss TV est à jour (%1$s)</string>
     <string name="update_check_failed">Impossible de vérifier les mises à jour</string>
 </resources>

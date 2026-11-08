@@ -221,6 +221,7 @@
     <string name="update_installing">Opening installer…</string>
     <string name="update_changelog_title">What\'s New</string>
     <string name="update_check_button">Check for Updates</string>
+    <string name="update_checking">Checking for updates…</string>
     <string name="update_already_latest">Abyss TV is up to date (%1$s)</string>
     <string name="update_check_failed">Unable to check for updates</string>
 </resources>
