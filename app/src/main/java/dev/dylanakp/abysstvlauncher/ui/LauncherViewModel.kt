@@ -106,6 +106,7 @@ data class LauncherUiState(
     val statusBannerMessage: String? = null,
     val activeCatalogSelection: dev.dylanakp.abysstvlauncher.ui.components.CatalogSelection? = null,
     val pendingUpdate: AppUpdate? = null,
+    val isCheckingUpdates: Boolean = false,
     val isDownloadingUpdate: Boolean = false,
     val updateDownloadProgress: Float = 0f,
     val updateError: String? = null
@@ -1526,6 +1527,11 @@ class LauncherViewModel : ViewModel() {
     fun showStatusMessage(message: String, durationMs: Long = 2500L) {
         viewModelScope.launch {
             _uiState.update { it.copy(statusBannerMessage = message) }
+            appContext?.let { ctx ->
+                try {
+                    android.widget.Toast.makeText(ctx, message, android.widget.Toast.LENGTH_SHORT).show()
+                } catch (_: Exception) {}
+            }
             delay(durationMs)
             _uiState.update {
                 if (it.statusBannerMessage == message) it.copy(statusBannerMessage = null) else it
@@ -1534,9 +1540,12 @@ class LauncherViewModel : ViewModel() {
     }
 
     fun checkForUpdates(silent: Boolean = false) {
+        if (_uiState.value.isCheckingUpdates) return
+        _uiState.update { it.copy(isCheckingUpdates = true) }
         viewModelScope.launch {
             AppUpdateRepository.checkLatestRelease()
                 .onSuccess { update ->
+                    _uiState.update { it.copy(isCheckingUpdates = false) }
                     if (update != null) {
                         _uiState.update {
                             it.copy(
@@ -1551,6 +1560,7 @@ class LauncherViewModel : ViewModel() {
                     }
                 }
                 .onFailure {
+                    _uiState.update { it.copy(isCheckingUpdates = false) }
                     if (!silent) {
                         showStatusMessage(getString(R.string.update_check_failed))
                     }
@@ -1570,8 +1580,9 @@ class LauncherViewModel : ViewModel() {
     }
 
     fun downloadAndInstallUpdate(context: Context) {
-        val update = _uiState.value.pendingUpdate ?: return
-        if (_uiState.value.isDownloadingUpdate) return
+        val update = _uiState.value.pendingUpdate
+        Log.d("AbyssUpdate", "downloadAndInstallUpdate triggered: $update")
+        if (update == null || _uiState.value.isDownloadingUpdate) return
 
         _uiState.update {
             it.copy(
@@ -1581,16 +1592,20 @@ class LauncherViewModel : ViewModel() {
             )
         }
         viewModelScope.launch {
+            Log.d("AbyssUpdate", "Downloading APK from: ${update.apkUrl}")
             AppUpdateRepository.downloadApk(context, update.apkUrl) { progress ->
                 _uiState.update { it.copy(updateDownloadProgress = progress) }
             }.onSuccess { apkFile ->
+                Log.d("AbyssUpdate", "Download successful: ${apkFile.absolutePath} (${apkFile.length()} bytes)")
                 _uiState.update { it.copy(isDownloadingUpdate = false) }
                 AppUpdateRepository.triggerInstall(context, apkFile).onFailure { error ->
+                    Log.e("AbyssUpdate", "Install trigger failed", error)
                     _uiState.update {
                         it.copy(updateError = error.localizedMessage ?: "Installation failed")
                     }
                 }
             }.onFailure { error ->
+                Log.e("AbyssUpdate", "Download failed", error)
                 _uiState.update {
                     it.copy(
                         isDownloadingUpdate = false,
