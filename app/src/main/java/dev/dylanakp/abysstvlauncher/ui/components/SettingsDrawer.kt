@@ -27,7 +27,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -171,7 +174,6 @@ fun SettingsDrawer(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(Color(0xFF1E2025))
-                                .border(1.dp, Color(0xFF2C3038), RoundedCornerShape(8.dp))
                                 .padding(horizontal = 12.dp, vertical = 7.dp)
                         ) {
                             Box(
@@ -320,7 +322,7 @@ fun SettingsDrawer(
 }
 
 @Composable
-fun M3ExpressiveGroup(
+fun SettingsGroup(
     title: String,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
@@ -344,7 +346,6 @@ fun M3ExpressiveGroup(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color(0xFF1E2025))
-                .border(1.dp, Color(0xFF2C3038), RoundedCornerShape(12.dp))
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             content = content
@@ -371,7 +372,7 @@ private fun JellyfinSectionContent(
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        M3ExpressiveGroup(title = stringResource(R.string.section_connection)) {
+        SettingsGroup(title = stringResource(R.string.section_connection)) {
             Text(
                 text = stringResource(R.string.jf_description),
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 16.sp),
@@ -420,14 +421,13 @@ private fun JellyfinSectionContent(
         }
 
         if (config.isConfigured && config.lastSyncTimestamp > 0L) {
-            M3ExpressiveGroup(title = stringResource(R.string.section_library_status)) {
+            SettingsGroup(title = stringResource(R.string.section_library_status)) {
                 val stats = stringResource(R.string.jf_stats_template, config.syncedMoviesCount, config.syncedSeriesCount)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color(0xFF14291F))
-                        .border(1.dp, Color(0xFF1B4332), RoundedCornerShape(8.dp))
                         .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -442,29 +442,28 @@ private fun JellyfinSectionContent(
             }
         }
 
-        M3ExpressiveGroup(title = stringResource(R.string.section_player_prefs)) {
-            val isFrench = java.util.Locale.getDefault().language.startsWith("fr")
+        SettingsGroup(title = stringResource(R.string.section_player_prefs)) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 GoogleTvRadioRow(
-                    title = if (isFrench) "Lecteur Abyss (ExoPlayer)" else "Abyss Player (ExoPlayer)",
-                    subtitle = if (isFrench) "Lecture fluide 4K native, reprise auto, sélection pistes audio & sous-titres" else "Smooth 4K native playback, auto-resume, audio & subtitle tracks",
+                    title = stringResource(R.string.player_abyss_title),
+                    subtitle = stringResource(R.string.player_abyss_subtitle),
                     icon = AbyssIconType.PLAY,
                     isSelected = config.playerPreference == PlayerPreference.ABYSS_INTERNAL,
                     onClick = { onSelectPlayerPreference(PlayerPreference.ABYSS_INTERNAL) }
                 )
                 GoogleTvRadioRow(
-                    title = if (isFrench) "Lecteur externe (VLC / JustPlayer)" else "External Player (VLC / JustPlayer)",
-                    subtitle = if (isFrench) "Délègue la lecture vidéo à VLC, JustPlayer, Nova ou Vimu" else "Delegates playback to VLC, JustPlayer, Nova or Vimu",
+                    title = stringResource(R.string.player_external_title),
+                    subtitle = stringResource(R.string.player_external_subtitle),
                     icon = AbyssIconType.EXTERNAL_LINK,
                     isSelected = config.playerPreference == PlayerPreference.EXTERNAL_PLAYER,
                     onClick = { onSelectPlayerPreference(PlayerPreference.EXTERNAL_PLAYER) }
                 )
                 GoogleTvRadioRow(
-                    title = if (isFrench) "Toujours demander" else "Always Ask",
-                    subtitle = if (isFrench) "Affiche la boîte de sélection d'application Android" else "Shows the Android system app chooser dialog",
+                    title = stringResource(R.string.player_always_ask_title),
+                    subtitle = stringResource(R.string.player_always_ask_subtitle),
                     icon = AbyssIconType.SETTINGS,
                     isSelected = config.playerPreference == PlayerPreference.SYSTEM_CHOOSER,
                     onClick = { onSelectPlayerPreference(PlayerPreference.SYSTEM_CHOOSER) }
@@ -492,7 +491,7 @@ private fun SeerSectionContent(
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        M3ExpressiveGroup(title = stringResource(R.string.settings_section_seer)) {
+        SettingsGroup(title = stringResource(R.string.settings_section_seer)) {
             Text(
                 text = stringResource(R.string.seer_description),
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 16.sp),
@@ -529,13 +528,12 @@ private fun SeerSectionContent(
         }
 
         if (config.isConfigured) {
-            M3ExpressiveGroup(title = stringResource(R.string.section_library_status)) {
+            SettingsGroup(title = stringResource(R.string.section_library_status)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color(0xFF14291F))
-                        .border(1.dp, Color(0xFF1B4332), RoundedCornerShape(8.dp))
                         .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -565,7 +563,6 @@ private fun AppearanceSectionContent(
     onSelectTemperatureUnit: (TemperatureUnit) -> Unit
 ) {
     val scrollState = rememberScrollState()
-    val isFrench = java.util.Locale.getDefault().language.startsWith("fr")
 
     Column(
         modifier = Modifier
@@ -573,28 +570,28 @@ private fun AppearanceSectionContent(
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        M3ExpressiveGroup(title = stringResource(R.string.appearance_language_label)) {
+        SettingsGroup(title = stringResource(R.string.appearance_language_label)) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 GoogleTvRadioRow(
                     title = "Auto (Système / System)",
-                    subtitle = if (isFrench) "Suit automatiquement la langue de votre NVIDIA Shield" else "Matches your TV system language",
+                    subtitle = stringResource(R.string.lang_auto_subtitle),
                     icon = AbyssIconType.GLOBE,
                     isSelected = currentLanguage == AppLanguage.AUTO,
                     onClick = { onSelectLanguage(AppLanguage.AUTO) }
                 )
                 GoogleTvRadioRow(
                     title = "Français",
-                    subtitle = "Interface, menus et métadonnées en langue française",
+                    subtitle = stringResource(R.string.lang_fr_subtitle),
                     icon = AbyssIconType.GLOBE,
                     isSelected = currentLanguage == AppLanguage.FR,
                     onClick = { onSelectLanguage(AppLanguage.FR) }
                 )
                 GoogleTvRadioRow(
                     title = "English",
-                    subtitle = "User interface, menus and overviews in English",
+                    subtitle = stringResource(R.string.lang_en_subtitle),
                     icon = AbyssIconType.GLOBE,
                     isSelected = currentLanguage == AppLanguage.EN,
                     onClick = { onSelectLanguage(AppLanguage.EN) }
@@ -602,33 +599,32 @@ private fun AppearanceSectionContent(
             }
         }
 
-        M3ExpressiveGroup(title = if (isFrench) "MÉTÉO (ÉCRAN D'ACCUEIL)" else "WEATHER (HOME SCREEN)") {
+        SettingsGroup(title = stringResource(R.string.settings_section_weather)) {
             var inputCity by remember(weatherCity) { mutableStateOf(weatherCity) }
-            val currentPreview = weatherInfo?.let { "${it.cityName} : ${it.displayString(temperatureUnit)}" } ?: "$weatherCity (chargement…)"
+            val currentPreview = weatherInfo?.let { "${it.cityName} : ${it.displayString(temperatureUnit)}" } ?: "$weatherCity"
 
             Text(
-                text = if (isFrench) "Affichage météo en haut à gauche : $currentPreview"
-                       else "Weather preview on top-left: $currentPreview",
+                text = stringResource(R.string.weather_preview_format, currentPreview),
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 color = Color(0xFFBDC1C6)
             )
 
             SettingsGlassInputField(
-                label = if (isFrench) "Ville pour la météo" else "City for weather",
+                label = stringResource(R.string.weather_city_label),
                 value = inputCity,
                 onValueChange = { inputCity = it },
                 placeholder = "Paris"
             )
 
             SettingsPrimaryActionButton(
-                label = if (isFrench) "Enregistrer la ville" else "Save City",
+                label = stringResource(R.string.weather_city_save_btn),
                 onClick = { onUpdateWeatherCity(inputCity.trim()) }
             )
 
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = if (isFrench) "Unité de température" else "Temperature Unit",
+                text = stringResource(R.string.weather_unit_label),
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontWeight = FontWeight.Bold,
                     fontSize = 11.sp,
@@ -643,23 +639,23 @@ private fun AppearanceSectionContent(
             ) {
                 GoogleTvRadioRow(
                     title = "Celsius (°C)",
-                    subtitle = if (isFrench) "Affichage de la température en degrés Celsius" else "Displays temperature in degrees Celsius",
+                    subtitle = stringResource(R.string.weather_celsius_sub),
                     isSelected = temperatureUnit == TemperatureUnit.CELSIUS,
                     onClick = { onSelectTemperatureUnit(TemperatureUnit.CELSIUS) }
                 )
                 GoogleTvRadioRow(
                     title = "Fahrenheit (°F)",
-                    subtitle = if (isFrench) "Affichage de la température en degrés Fahrenheit" else "Displays temperature in degrees Fahrenheit",
+                    subtitle = stringResource(R.string.weather_fahrenheit_sub),
                     isSelected = temperatureUnit == TemperatureUnit.FAHRENHEIT,
                     onClick = { onSelectTemperatureUnit(TemperatureUnit.FAHRENHEIT) }
                 )
             }
         }
 
-        M3ExpressiveGroup(title = stringResource(R.string.section_app_drawer)) {
+        SettingsGroup(title = stringResource(R.string.section_app_drawer)) {
             GoogleTvSwitchRow(
                 title = stringResource(R.string.appearance_show_hidden_apps),
-                subtitle = if (isFrench) "Afficher ou masquer les applications cachées dans la grille" else "Display hidden applications inside the apps catalog",
+                subtitle = stringResource(R.string.appearance_show_hidden_apps_sub),
                 icon = AbyssIconType.APPS_GRID,
                 isChecked = showHiddenApps,
                 onClick = { onToggleShowHiddenApps(!showHiddenApps) }
@@ -691,11 +687,6 @@ private fun SettingsSidebarActionButton(
             }
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) Color(0xFFE8EAED) else Color.Transparent)
-            .border(
-                1.dp,
-                if (isFocused) Color.White else Color.Transparent,
-                RoundedCornerShape(8.dp)
-            )
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }
             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -757,15 +748,15 @@ private fun SettingsHeaderGearButton(
             .size(36.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) Color(0xFFE8EAED) else Color(0xFF1E2025))
-            .border(1.dp, if (isFocused) Color.White else Color(0xFF2C3038), RoundedCornerShape(8.dp))
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        AbyssIcon(
-            type = AbyssIconType.SETTINGS,
-            color = if (isFocused) Color(0xFF131314) else Color(0xFFBDC1C6),
-            size = 18.dp
+        Icon(
+            imageVector = Icons.Default.Settings,
+            contentDescription = contentDescription,
+            tint = if (isFocused) Color(0xFF131314) else Color(0xFFBDC1C6),
+            modifier = Modifier.size(18.dp)
         )
     }
 }
@@ -798,18 +789,9 @@ private fun SettingsNavTab(
             .background(
                 when {
                     isFocused -> Color(0xFFE8EAED)
-                    isSelected -> Color(0xFF1E2025)
+                    isSelected -> Color(0xFF282D37)
                     else -> Color.Transparent
                 }
-            )
-            .border(
-                1.dp,
-                when {
-                    isFocused -> Color.White
-                    isSelected -> Color(0xFF2C3038)
-                    else -> Color.Transparent
-                },
-                RoundedCornerShape(8.dp)
             )
             .onFocusChanged {
                 isFocused = it.isFocused
@@ -884,7 +866,6 @@ private fun SettingsBackButton(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) Color(0xFFE8EAED) else Color(0xFF1E2025))
-            .border(1.dp, if (isFocused) Color.White else Color(0xFF2C3038), RoundedCornerShape(8.dp))
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 8.dp),
@@ -933,8 +914,7 @@ private fun SettingsGlassInputField(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF16181D))
-                .border(1.dp, if (isFocused) Color(0xFF8AB4F8) else Color(0xFF2C3038), RoundedCornerShape(8.dp))
+                .background(if (isFocused) Color(0xFF282D37) else Color(0xFF16181D))
                 .padding(horizontal = 14.dp, vertical = 11.dp)
         ) {
             BasicTextField(
@@ -991,11 +971,6 @@ private fun SettingsPrimaryActionButton(
             }
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) Color(0xFFE8EAED) else Color(0xFF1A73E8))
-            .border(
-                1.dp,
-                if (isFocused) Color.White else Color.Transparent,
-                RoundedCornerShape(8.dp)
-            )
             .onFocusChanged { isFocused = it.isFocused }
             .clickable(enabled = !isLoading) { onClick() }
             .padding(vertical = 12.dp),
@@ -1049,15 +1024,6 @@ private fun GoogleTvRadioRow(
                     isSelected -> Color(0xFF252932)
                     else -> Color(0xFF181A1F)
                 }
-            )
-            .border(
-                1.dp,
-                when {
-                    isFocused -> Color.White
-                    isSelected -> Color(0xFF384357)
-                    else -> Color(0xFF252932)
-                },
-                RoundedCornerShape(8.dp)
             )
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }
@@ -1170,15 +1136,6 @@ private fun GoogleTvSwitchRow(
                     isChecked -> Color(0xFF252932)
                     else -> Color(0xFF181A1F)
                 }
-            )
-            .border(
-                1.dp,
-                when {
-                    isFocused -> Color.White
-                    isChecked -> Color(0xFF384357)
-                    else -> Color(0xFF252932)
-                },
-                RoundedCornerShape(8.dp)
             )
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }
