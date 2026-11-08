@@ -2,7 +2,9 @@ package dev.dylanakp.abysstvlauncher.ui.components
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import coil.compose.AsyncImage
 import android.view.KeyEvent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -83,7 +85,8 @@ fun AppCard(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null
+    onNavigateUp: (() -> Unit)? = null,
+    onFocus: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var longPressConsumed by remember { mutableStateOf(false) }
@@ -100,7 +103,9 @@ fun AppCard(
             .width(180.dp)
             .onFocusChanged {
                 isFocused = it.isFocused
-                if (!it.isFocused) {
+                if (it.isFocused) {
+                    onFocus?.invoke()
+                } else {
                     longPressConsumed = false
                 }
             }
@@ -159,12 +164,11 @@ fun AppCard(
                     this.scaleX = cardScale.value
                     this.scaleY = cardScale.value
                 }
-                .clip(RoundedCornerShape(10.dp))
-                .background(AbyssSurfaceGlass)
-                .border(
-                    width = if (isFocused) 2.dp else 1.dp,
-                    color = if (isFocused) Color.White else AbyssBorderHairline,
-                    shape = RoundedCornerShape(10.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (isFocused) Color(0x38FFFFFF) else AbyssSurfaceGlass)
+                .then(
+                    if (isFocused) Modifier.border(1.5.dp, Color.White, RoundedCornerShape(12.dp))
+                    else Modifier
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -174,10 +178,16 @@ fun AppCard(
 
             val isRemoteLocator = app.packageName == "com.nvidia.remotelocator"
 
-            val bannerBmp = remember(app.packageName, app.banner) {
-                if (app.banner == null) null
-                else appBannerBitmapCache.getOrPut(app.packageName) {
-                    app.banner.toBitmapSafe(340, 196)?.asImageBitmap() ?: return@remember null
+            val isWideBanner = app.isLeanback && app.banner != null && (
+                app.banner.intrinsicWidth <= 0 || app.banner.intrinsicWidth >= app.banner.intrinsicHeight * 1.2f
+            )
+
+            val bannerBmp = remember(app.packageName, app.banner, isWideBanner) {
+                if (!isWideBanner) null
+                else app.banner?.let { banner ->
+                    appBannerBitmapCache.getOrPut(app.packageName) {
+                        banner.toBitmapSafe(340, 196)?.asImageBitmap()
+                    }
                 }
             }
             val iconBmp = remember(app.packageName, app.icon) {
@@ -208,7 +218,7 @@ fun AppCard(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
-            } else if (iconBmp != null) {
+            } else if (iconBmp != null || app.icon != null) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -216,16 +226,26 @@ fun AppCard(
                     Box(
                         modifier = Modifier
                             .size(54.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0x22FFFFFF))
-                            .padding(6.dp),
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0x18FFFFFF))
+                            .padding(4.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Image(
-                            bitmap = iconBmp,
-                            contentDescription = app.label,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        if (iconBmp != null) {
+                            Image(
+                                bitmap = iconBmp,
+                                contentDescription = app.label,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        } else {
+                            AsyncImage(
+                                model = app.icon,
+                                contentDescription = app.label,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
                     }
                 }
             } else {
@@ -262,13 +282,22 @@ fun AppCard(
 
 internal fun Drawable.toBitmapSafe(maxWidth: Int, maxHeight: Int): Bitmap? {
     return try {
+        if (this is BitmapDrawable && bitmap != null && !bitmap.isRecycled) {
+            val bmp = bitmap
+            if (bmp.config != Bitmap.Config.HARDWARE && bmp.width <= maxWidth && bmp.height <= maxHeight) {
+                return bmp
+            }
+            val w = bmp.width.coerceAtMost(maxWidth).coerceAtLeast(1)
+            val h = bmp.height.coerceAtMost(maxHeight).coerceAtLeast(1)
+            return Bitmap.createScaledBitmap(bmp.copy(Bitmap.Config.ARGB_8888, false), w, h, true)
+        }
         val rawW = intrinsicWidth.takeIf { it > 0 } ?: maxWidth
         val rawH = intrinsicHeight.takeIf { it > 0 } ?: maxHeight
-        val width = rawW.coerceAtMost(maxWidth)
-        val height = rawH.coerceAtMost(maxHeight)
+        val width = rawW.coerceAtMost(maxWidth).coerceAtLeast(1)
+        val height = rawH.coerceAtMost(maxHeight).coerceAtLeast(1)
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        setBounds(0, 0, canvas.width, canvas.height)
+        setBounds(0, 0, width, height)
         draw(canvas)
         bitmap
     } catch (_: Exception) {

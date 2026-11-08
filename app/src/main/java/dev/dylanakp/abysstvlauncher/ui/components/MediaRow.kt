@@ -278,12 +278,11 @@ fun MediaPosterCard(
                     this.shape = cardShape
                     this.clip = true
                 }
-                .border(
-                    width = if (isFocused) 2.dp else 1.dp,
-                    color = if (isFocused) Color.White else AbyssBorderHairline,
-                    shape = cardShape
+                .background(if (isFocused) Color(0x38FFFFFF) else AbyssSurfaceGlass)
+                .then(
+                    if (isFocused) Modifier.border(1.5.dp, Color.White, cardShape)
+                    else Modifier
                 )
-                .background(AbyssSurfaceGlass)
         ) {
             val isProcessing = item.seerStatus == dev.dylanakp.abysstvlauncher.model.SeerMediaStatus.PROCESSING
             AbyssMediaArtwork(
@@ -555,10 +554,9 @@ fun LiveChannelCard(
                     this.clip = true
                 }
                 .background(if (isFocused) Color.White else Color(0x60181B26))
-                .border(
-                    width = if (isFocused) 2.dp else 1.dp,
-                    color = if (isFocused) Color.White else AbyssBorderHairline,
-                    shape = channelShape
+                .then(
+                    if (isFocused) Modifier.border(1.5.dp, Color.White, channelShape)
+                    else Modifier
                 )
                 .padding(8.dp)
         ) {
@@ -695,10 +693,9 @@ fun SeeMoreCard(
                 }
                 .clip(RoundedCornerShape(10.dp))
                 .background(if (isFocused) Color.White else Color(0x331C2233))
-                .border(
-                    width = if (isFocused) 2.dp else 1.dp,
-                    color = if (isFocused) Color.White else AbyssBorderHairline,
-                    shape = RoundedCornerShape(10.dp)
+                .then(
+                    if (isFocused) Modifier.border(1.5.dp, Color.White, RoundedCornerShape(10.dp))
+                    else Modifier
                 )
                 .padding(12.dp),
             contentAlignment = Alignment.Center
