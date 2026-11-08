@@ -1,9 +1,15 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version override (empty = auto YY.MM.X)'
+        required: false
+        type: string
   push:
     tags:
-      - '*'
+      - '[0-9][0-9].[0-9][0-9].*'
 
 jobs:
   release:
@@ -13,10 +19,45 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Determine Version
+        id: versioning
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            TAG="${{ inputs.version }}"
+          else
+            PREFIX=$(date +"%y.%m")
+            MATCHING_TAGS=$(git tag -l "${PREFIX}.*" | sort -V)
+            if [ -z "$MATCHING_TAGS" ]; then
+              NEXT_PATCH=0
+            else
+              LATEST_TAG=$(echo "$MATCHING_TAGS" | tail -n 1)
+              LATEST_PATCH="${LATEST_TAG##*.}"
+              NEXT_PATCH=$((10#$LATEST_PATCH + 1))
+            fi
+            TAG="${PREFIX}.${NEXT_PATCH}"
+          fi
+
+          echo "Selected Version: $TAG"
+
+          IFS='.' read -r YY MM PATCH <<< "$TAG"
+          VERSION_CODE=$(( 10#$YY * 10000 + 10#$MM * 100 + 10#${PATCH:-0} ))
+
+          echo "version_name=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -29,16 +70,20 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease
-
-      - name: Prepare Release Artifact
         run: |
-          TAG_NAME="${GITHUB_REF_NAME}"
-          cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/Abyss-Launcher-${TAG_NAME}.apk"
+          ./gradlew assembleRelease \
+            -PversionName="${{ steps.versioning.outputs.version_name }}" \
+            -PversionCode="${{ steps.versioning.outputs.version_code }}"
+
+      - name: Package Release Artifact
+        run: |
+          VERSION="${{ steps.versioning.outputs.version_name }}"
+          cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/Abyss-Launcher-${VERSION}.apk"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Release ${{ github.ref_name }}
+          tag_name: ${{ steps.versioning.outputs.version_name }}
+          name: Release ${{ steps.versioning.outputs.version_name }}
           files: app/build/outputs/apk/release/Abyss-Launcher-*.apk
           generate_release_notes: true
