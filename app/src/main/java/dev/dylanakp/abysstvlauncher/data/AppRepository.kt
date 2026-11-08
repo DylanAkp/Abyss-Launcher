@@ -59,8 +59,12 @@ object AppRepository {
                 rawLabel
             }
             val banner = try {
-                resolveInfo.activityInfo.loadBanner(pm)
-                    ?: pm.getApplicationBanner(pkg)
+                if (leanbackPkgSet.contains(pkg)) {
+                    resolveInfo.activityInfo.loadBanner(pm)
+                        ?: pm.getApplicationBanner(pkg)
+                } else {
+                    null
+                }
             } catch (_: Exception) {
                 null
             }
