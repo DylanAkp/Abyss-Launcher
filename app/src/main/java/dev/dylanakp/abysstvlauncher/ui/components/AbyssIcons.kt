@@ -2,6 +2,9 @@ package dev.dylanakp.abysstvlauncher.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -9,11 +12,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.cos
@@ -51,7 +57,40 @@ enum class AbyssIconType {
     SERVER,
     GLOBE,
     REMOTE,
-    DOWNLOAD
+    DOWNLOAD,
+    SPARKLE,
+    COMPASS
+}
+
+val CompassExploreIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        name = "Filled.Explore",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        path(fill = SolidColor(Color.White)) {
+            moveTo(12f, 10.9f)
+            curveToRelative(-0.61f, 0f, -1.1f, 0.49f, -1.1f, 1.1f)
+            reflectiveCurveToRelative(0.49f, 1.1f, 1.1f, 1.1f)
+            curveToRelative(0.61f, 0f, 1.1f, -0.49f, 1.1f, -1.1f)
+            reflectiveCurveToRelative(-0.49f, -1.1f, -1.1f, -1.1f)
+            close()
+            moveTo(12f, 2f)
+            curveTo(6.48f, 2f, 2f, 6.48f, 2f, 12f)
+            reflectiveCurveToRelative(4.48f, 10f, 10f, 10f)
+            reflectiveCurveToRelative(10f, -4.48f, 10f, -10f)
+            reflectiveCurveTo(17.52f, 2f, 12f, 2f)
+            close()
+            moveTo(14.19f, 14.19f)
+            lineTo(6f, 18f)
+            lineToRelative(3.81f, -8.19f)
+            lineTo(18f, 6f)
+            lineToRelative(-3.81f, 8.19f)
+            close()
+        }
+    }.build()
 }
 
 @Composable
@@ -61,6 +100,25 @@ fun AbyssIcon(
     modifier: Modifier = Modifier,
     size: Dp = 14.dp
 ) {
+    if (type == AbyssIconType.SETTINGS) {
+        Icon(
+            imageVector = Icons.Default.Settings,
+            contentDescription = null,
+            tint = color,
+            modifier = modifier.size(size)
+        )
+        return
+    }
+    if (type == AbyssIconType.COMPASS) {
+        Icon(
+            imageVector = CompassExploreIcon,
+            contentDescription = null,
+            tint = color,
+            modifier = modifier.size(size)
+        )
+        return
+    }
+
     Canvas(modifier = modifier.size(size)) {
         val w = this.size.width
         val h = this.size.height
@@ -104,6 +162,7 @@ fun AbyssIcon(
             AbyssIconType.GLOBE -> drawGlobe(w, h, color, stroke)
             AbyssIconType.REMOTE -> drawRemote(w, h, color, stroke)
             AbyssIconType.DOWNLOAD -> drawDownload(w, h, color, stroke)
+            AbyssIconType.SPARKLE -> drawSparkle(w, h, color)
         }
     }
 }
@@ -332,33 +391,67 @@ private fun DrawScope.drawExternalLink(w: Float, h: Float, color: Color, stroke:
 private fun DrawScope.drawSearch(w: Float, h: Float, color: Color, stroke: Stroke) {
     drawCircle(
         color = color,
-        radius = w * 0.28f,
-        center = Offset(w * 0.44f, h * 0.44f),
+        radius = w * 0.26f,
+        center = Offset(w * 0.42f, h * 0.42f),
         style = stroke
     )
     drawLine(
         color = color,
-        start = Offset(w * 0.64f, h * 0.64f),
-        end = Offset(w * 0.86f, h * 0.86f),
-        strokeWidth = stroke.width,
+        start = Offset(w * 0.61f, h * 0.61f),
+        end = Offset(w * 0.84f, h * 0.84f),
+        strokeWidth = stroke.width * 1.15f,
         cap = StrokeCap.Round
     )
 }
 
 private fun DrawScope.drawSettings(w: Float, h: Float, color: Color, stroke: Stroke) {
-    // Minimalist Sliders / Tuning icon (crisp at small sizes)
-    val y1 = h * 0.28f
-    val y2 = h * 0.50f
-    val y3 = h * 0.72f
+    val cx = w * 0.5f
+    val cy = h * 0.5f
+    val outerR = w * 0.38f
+    val innerR = w * 0.26f
+    val holeR = w * 0.12f
 
-    drawLine(color, Offset(w * 0.14f, y1), Offset(w * 0.86f, y1), stroke.width, StrokeCap.Round)
-    drawCircle(color, radius = w * 0.10f, center = Offset(w * 0.36f, y1))
+    // 6 mechanical gear teeth
+    for (i in 0 until 6) {
+        val angle = i * (Math.PI / 3.0)
+        val cosA = cos(angle).toFloat()
+        val sinA = sin(angle).toFloat()
+        drawLine(
+            color = color,
+            start = Offset(cx + innerR * cosA, cy + innerR * sinA),
+            end = Offset(cx + outerR * cosA, cy + outerR * sinA),
+            strokeWidth = stroke.width * 1.6f,
+            cap = StrokeCap.Round
+        )
+    }
+    // Main ring
+    drawCircle(
+        color = color,
+        radius = innerR,
+        center = Offset(cx, cy),
+        style = stroke
+    )
+    // Center axle hole
+    drawCircle(
+        color = color,
+        radius = holeR,
+        center = Offset(cx, cy),
+        style = stroke
+    )
+}
 
-    drawLine(color, Offset(w * 0.14f, y2), Offset(w * 0.86f, y2), stroke.width, StrokeCap.Round)
-    drawCircle(color, radius = w * 0.10f, center = Offset(w * 0.66f, y2))
-
-    drawLine(color, Offset(w * 0.14f, y3), Offset(w * 0.86f, y3), stroke.width, StrokeCap.Round)
-    drawCircle(color, radius = w * 0.10f, center = Offset(w * 0.44f, y3))
+private fun DrawScope.drawSparkle(w: Float, h: Float, color: Color) {
+    val cx = w * 0.5f
+    val cy = h * 0.5f
+    val path = Path().apply {
+        moveTo(cx, h * 0.12f)
+        quadraticBezierTo(cx, cy, w * 0.88f, cy)
+        quadraticBezierTo(cx, cy, cx, h * 0.88f)
+        quadraticBezierTo(cx, cy, w * 0.12f, cy)
+        quadraticBezierTo(cx, cy, cx, h * 0.12f)
+        close()
+    }
+    drawPath(path, color = color, style = Fill)
 }
 
 private fun DrawScope.drawStar(w: Float, h: Float, color: Color, filled: Boolean, stroke: Stroke) {
@@ -491,13 +584,15 @@ private fun DrawScope.drawAppsGrid(w: Float, h: Float, color: Color, stroke: Str
 
 private fun DrawScope.drawHome(w: Float, h: Float, color: Color, stroke: Stroke) {
     val path = Path().apply {
-        moveTo(w * 0.14f, h * 0.46f)
-        lineTo(w * 0.50f, h * 0.14f)
-        lineTo(w * 0.86f, h * 0.46f)
-        lineTo(w * 0.80f, h * 0.46f)
-        lineTo(w * 0.80f, h * 0.84f)
-        lineTo(w * 0.20f, h * 0.84f)
-        lineTo(w * 0.20f, h * 0.46f)
+        moveTo(w * 0.16f, h * 0.46f)
+        lineTo(w * 0.50f, h * 0.18f)
+        lineTo(w * 0.84f, h * 0.46f)
+        lineTo(w * 0.84f, h * 0.82f)
+        lineTo(w * 0.58f, h * 0.82f)
+        lineTo(w * 0.58f, h * 0.56f)
+        lineTo(w * 0.42f, h * 0.56f)
+        lineTo(w * 0.42f, h * 0.82f)
+        lineTo(w * 0.16f, h * 0.82f)
         close()
     }
     drawPath(path, color = color, style = stroke)
