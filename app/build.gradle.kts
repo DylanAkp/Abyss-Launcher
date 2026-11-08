@@ -22,12 +22,16 @@ fun escapeString(str: String): String = str.replace("\\", "\\\\").replace("\"", 
 android {
     namespace = "dev.dylanakp.abysstvlauncher"
     compileSdk = 36
+
+    val vName = providers.gradleProperty("versionName").getOrElse("26.11.0")
+    val vCode = providers.gradleProperty("versionCode").map { it.toInt() }.getOrElse(261100)
+
     defaultConfig {
         applicationId = "dev.dylanakp.abysstvlauncher"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = vCode
+        versionName = vName
 
         buildConfigField("String", "DEFAULT_JELLYFIN_SERVER", "\"${escapeString(envProps["JELLYFIN_SERVER_URL"] ?: "")}\"")
         buildConfigField("String", "DEFAULT_JELLYFIN_USER", "\"${escapeString(envProps["JELLYFIN_USERNAME"] ?: "")}\"")
