@@ -72,6 +72,7 @@ import dev.dylanakp.abysstvlauncher.ui.components.AbyssSearchScreen
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssTopBar
 import dev.dylanakp.abysstvlauncher.ui.components.AppCard
 import dev.dylanakp.abysstvlauncher.ui.components.AppContextMenu
+import dev.dylanakp.abysstvlauncher.ui.components.AppUpdateModal
 import dev.dylanakp.abysstvlauncher.ui.components.CategoryCatalogScreen
 import dev.dylanakp.abysstvlauncher.ui.components.HeroBackdropArtwork
 import dev.dylanakp.abysstvlauncher.ui.components.HeroSpotlightContent
@@ -934,7 +935,18 @@ fun MainScreen(
             onSelectLanguage = { viewModel.setLanguage(it) },
             onToggleShowHiddenApps = { viewModel.setShowHiddenApps(it) },
             onUpdateWeatherCity = { viewModel.setWeatherCity(it) },
-            onSelectTemperatureUnit = { viewModel.setTemperatureUnit(it) }
+            onSelectTemperatureUnit = { viewModel.setTemperatureUnit(it) },
+            onCheckForUpdates = { viewModel.checkForUpdates(silent = false) }
+        )
+
+        // App Update Prompt Modal
+        AppUpdateModal(
+            update = state.pendingUpdate,
+            isDownloading = state.isDownloadingUpdate,
+            downloadProgress = state.updateDownloadProgress,
+            errorMessage = state.updateError,
+            onDismiss = { viewModel.dismissUpdate() },
+            onUpdate = { viewModel.downloadAndInstallUpdate(context) }
         )
     }
 }

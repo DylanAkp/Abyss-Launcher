@@ -210,4 +210,17 @@
     <string name="remove_from_continue">Retirer de \"Reprendre\"</string>
     <string name="remove_from_watchlist">Retirer de Ma Liste</string>
     <string name="no_synopsis_available">Aucun synopsis disponible.</string>
+
+    <!-- Mises à jour -->
+    <string name="update_available_title">Mise à jour disponible</string>
+    <string name="update_available_version">La version %1$s est disponible (actuelle : %2$s)</string>
+    <string name="update_action_now">Mettre à jour</string>
+    <string name="update_action_later">Plus tard</string>
+    <string name="update_action_retry">Réessayer</string>
+    <string name="update_downloading">Téléchargement… %1$d%%</string>
+    <string name="update_installing">Ouverture de l\'installateur…</string>
+    <string name="update_changelog_title">Nouveautés</string>
+    <string name="update_check_button">Vérifier les mises à jour</string>
+    <string name="update_already_latest">Abyss TV est à jour (%1$s)</string>
+    <string name="update_check_failed">Impossible de vérifier les mises à jour</string>
 </resources>

@@ -1,5 +1,6 @@
 package dev.dylanakp.abysstvlauncher.ui.components
 
+import dev.dylanakp.abysstvlauncher.BuildConfig
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -88,7 +89,8 @@ fun SettingsDrawer(
     onSelectLanguage: (AppLanguage) -> Unit,
     onToggleShowHiddenApps: (Boolean) -> Unit,
     onUpdateWeatherCity: (String) -> Unit = {},
-    onSelectTemperatureUnit: (TemperatureUnit) -> Unit = {}
+    onSelectTemperatureUnit: (TemperatureUnit) -> Unit = {},
+    onCheckForUpdates: () -> Unit = {}
 ) {
     AnimatedVisibility(
         visible = isOpen,
@@ -264,6 +266,13 @@ fun SettingsDrawer(
                             subLabel = stringResource(R.string.sys_android_settings_sub),
                             icon = AbyssIconType.SETTINGS,
                             onClick = onOpenAndroidSettings
+                        )
+
+                        SettingsSidebarActionButton(
+                            label = stringResource(R.string.update_check_button),
+                            subLabel = "v${BuildConfig.VERSION_NAME}",
+                            icon = AbyssIconType.INFO,
+                            onClick = onCheckForUpdates
                         )
                     }
 
