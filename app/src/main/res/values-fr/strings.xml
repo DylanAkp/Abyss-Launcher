@@ -196,7 +196,7 @@
     <!-- Catalog Screen -->
     <string name="catalog_total_items">%1$d éléments au total</string>
     <string name="catalog_filter_placeholder">Filtrer dans la liste…</string>
-    <!-- Material 3 Expressive Section Titles -->
+    <!-- Titres de section Paramètres -->
     <string name="section_connection">Connexion</string>
     <string name="section_player_prefs">Lecture &amp; Préférences</string>
     <string name="section_library_status">État de la synchronisation</string>
@@ -224,4 +224,25 @@
     <string name="update_checking">Vérification en cours…</string>
     <string name="update_already_latest">Abyss TV est à jour (%1$s)</string>
     <string name="update_check_failed">Impossible de vérifier les mises à jour</string>
+
+    <!-- Options de Lecteur Vidéo -->
+    <string name="player_abyss_title">Lecteur Abyss (ExoPlayer)</string>
+    <string name="player_abyss_subtitle">Lecture fluide 4K native, reprise auto, sélection pistes audio &amp; sous-titres</string>
+    <string name="player_external_title">Lecteur externe (VLC / JustPlayer)</string>
+    <string name="player_external_subtitle">Délègue la lecture vidéo à VLC, JustPlayer, Nova ou Vimu</string>
+    <string name="player_always_ask_title">Toujours demander</string>
+    <string name="player_always_ask_subtitle">Affiche la boîte de sélection d\'application Android</string>
+
+    <!-- Options Langue & Météo -->
+    <string name="lang_auto_subtitle">Suit automatiquement la langue de votre système TV</string>
+    <string name="lang_fr_subtitle">Interface, menus et métadonnées en langue française</string>
+    <string name="lang_en_subtitle">Interface utilisateur, menus et résumés en anglais</string>
+    <string name="settings_section_weather">Météo (Écran d\'accueil)</string>
+    <string name="weather_preview_format">Affichage météo en haut à gauche : %1$s</string>
+    <string name="weather_city_label">Ville pour la météo</string>
+    <string name="weather_city_save_btn">Enregistrer la ville</string>
+    <string name="weather_unit_label">Unité de température</string>
+    <string name="weather_celsius_sub">Affichage de la température en degrés Celsius</string>
+    <string name="weather_fahrenheit_sub">Affichage de la température en degrés Fahrenheit</string>
+    <string name="appearance_show_hidden_apps_sub">Afficher ou masquer les applications cachées dans la grille</string>
 </resources>

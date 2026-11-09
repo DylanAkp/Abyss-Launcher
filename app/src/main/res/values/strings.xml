@@ -196,7 +196,7 @@
     <!-- Catalog Screen -->
     <string name="catalog_total_items">%1$d total items</string>
     <string name="catalog_filter_placeholder">Filter category…</string>
-    <!-- Material 3 Expressive Section Titles -->
+    <!-- Settings Section Titles -->
     <string name="section_connection">Connection</string>
     <string name="section_player_prefs">Playback &amp; Preferences</string>
     <string name="section_library_status">Library Sync Status</string>
@@ -224,4 +224,25 @@
     <string name="update_checking">Checking for updates…</string>
     <string name="update_already_latest">Abyss TV is up to date (%1$s)</string>
     <string name="update_check_failed">Unable to check for updates</string>
+
+    <!-- Player Preference Options -->
+    <string name="player_abyss_title">Abyss Player (ExoPlayer)</string>
+    <string name="player_abyss_subtitle">Smooth 4K native playback, auto-resume, audio &amp; subtitle tracks</string>
+    <string name="player_external_title">External Player (VLC / JustPlayer)</string>
+    <string name="player_external_subtitle">Delegates playback to VLC, JustPlayer, Nova or Vimu</string>
+    <string name="player_always_ask_title">Always Ask</string>
+    <string name="player_always_ask_subtitle">Shows the Android system app chooser dialog</string>
+
+    <!-- Language & Weather Options -->
+    <string name="lang_auto_subtitle">Matches your TV system language</string>
+    <string name="lang_fr_subtitle">Interface, menus and overviews in French</string>
+    <string name="lang_en_subtitle">User interface, menus and overviews in English</string>
+    <string name="settings_section_weather">Weather (Home Screen)</string>
+    <string name="weather_preview_format">Weather preview on top-left: %1$s</string>
+    <string name="weather_city_label">City for weather</string>
+    <string name="weather_city_save_btn">Save City</string>
+    <string name="weather_unit_label">Temperature Unit</string>
+    <string name="weather_celsius_sub">Displays temperature in degrees Celsius</string>
+    <string name="weather_fahrenheit_sub">Displays temperature in degrees Fahrenheit</string>
+    <string name="appearance_show_hidden_apps_sub">Display hidden applications inside the apps catalog</string>
 </resources>
