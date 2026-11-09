@@ -14,7 +14,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -574,8 +573,7 @@ fun AbyssPlayerScreen(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .clip(RoundedCornerShape(50))
-                    .background(Color(0xB3000000))
-                    .border(1.dp, AbyssBorderHairline, RoundedCornerShape(50))
+                    .background(Color(0xCC101420))
                     .padding(18.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -599,8 +597,7 @@ fun AbyssPlayerScreen(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(AbyssSurfaceGlassElevated)
-                    .border(1.dp, Color.White, RoundedCornerShape(50))
+                    .background(Color(0xCC101420))
                     .padding(horizontal = 24.dp, vertical = 12.dp)
             ) {
                 Row(
@@ -637,8 +634,7 @@ fun AbyssPlayerScreen(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(AbyssSurfaceGlassElevated)
-                    .border(1.dp, AbyssBorderHairline, RoundedCornerShape(16.dp))
+                    .background(Color(0xF0121622))
                     .padding(28.dp)
             ) {
                 Column(
@@ -758,9 +754,8 @@ fun AbyssPlayerScreen(
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
-                                .background(AbyssPillGlass)
-                                .border(1.dp, AbyssBorderHairline, RoundedCornerShape(50))
-                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                                .background(Color(0x66101420))
+                                .padding(horizontal = 16.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
@@ -819,8 +814,7 @@ fun AbyssPlayerScreen(
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(AbyssSurfaceGlassElevated)
-                                .border(1.dp, AbyssBorderHairline, RoundedCornerShape(12.dp))
+                                .background(Color(0xDD181D2A))
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -996,7 +990,7 @@ fun AbyssPlayerScreen(
                         val activeAudioLabel = audioTracks.firstOrNull { it.isSelected }?.label
                         val audioTitle = stringResource(R.string.audio_tracks_title)
                         OsdPillButton(
-                            label = if (!activeAudioLabel.isNullOrBlank()) "$audioTitle • $activeAudioLabel" else audioTitle,
+                            label = activeAudioLabel?.ifBlank { audioTitle } ?: audioTitle,
                             icon = AbyssIconType.AUDIO_SPEAKER,
                             onClick = {
                                 refreshTracks(exoPlayer.currentTracks)
@@ -1007,13 +1001,9 @@ fun AbyssPlayerScreen(
 
                         val activeSub = subtitleTracks.firstOrNull { it.isSelected && !it.isOffOption }
                         val subTitle = stringResource(R.string.subtitles_title)
-                        val subStateText = activeSub?.label
+                        val subLabel = activeSub?.label?.ifBlank { subTitle } ?: subTitle
                         OsdPillButton(
-                            label = if (subStateText != null) {
-                                "$subTitle • $subStateText"
-                            } else {
-                                subTitle
-                            },
+                            label = subLabel,
                             icon = AbyssIconType.SUBTITLES_CC,
                             onClick = {
                                 refreshTracks(exoPlayer.currentTracks)
@@ -1116,8 +1106,7 @@ private fun PlayerSideDrawerModal(
             .fillMaxHeight()
             .padding(16.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(AbyssSurfaceGlassElevated)
-            .border(1.dp, AbyssBorderHairline, RoundedCornerShape(16.dp))
+            .background(Color(0xF0141824))
             .padding(20.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -1221,14 +1210,9 @@ private fun TrackOptionRowItem(
             .background(
                 when {
                     isFocused -> Color.White
-                    isSelected -> Color(0x28FFFFFF)
-                    else -> Color(0x12FFFFFF)
+                    isSelected -> Color(0x38FFFFFF)
+                    else -> Color(0x14FFFFFF)
                 }
-            )
-            .border(
-                1.dp,
-                if (isFocused || isSelected) Color.White else AbyssBorderHairline,
-                RoundedCornerShape(10.dp)
             )
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }
@@ -1246,7 +1230,7 @@ private fun TrackOptionRowItem(
                         fontWeight = if (isFocused || isSelected) FontWeight.Bold else FontWeight.Medium,
                         fontSize = 13.sp
                     ),
-                    color = if (isFocused) Color.Black else AbyssTextPrimary,
+                    color = if (isFocused) Color(0xFF1E222B) else AbyssTextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1254,7 +1238,7 @@ private fun TrackOptionRowItem(
                     Text(
                         text = subtitle,
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                        color = if (isFocused) Color(0xFF444444) else AbyssTextSecondary,
+                        color = if (isFocused) Color(0xFF555555) else AbyssTextSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1263,7 +1247,7 @@ private fun TrackOptionRowItem(
             if (isSelected) {
                 AbyssIcon(
                     type = AbyssIconType.CHECK,
-                    color = if (isFocused) Color.Black else Color.White,
+                    color = if (isFocused) Color(0xFF1E222B) else Color.White,
                     size = 14.dp
                 )
             }
@@ -1282,27 +1266,22 @@ private fun OsdPillButton(
     var isFocused by remember { mutableStateOf(false) }
 
     val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.06f else 1f,
+        targetValue = if (isFocused) 1.05f else 1f,
         animationSpec = tween(110),
         label = "osdBtnScale"
     )
     val bgColor by animateColorAsState(
         targetValue = when {
             isFocused -> Color.White
-            isPrimary -> Color(0x33FFFFFF)
-            else -> AbyssPillGlass
+            isPrimary -> Color(0x38FFFFFF)
+            else -> Color(0x66101420)
         },
         animationSpec = tween(110),
         label = "osdBtnBg"
     )
-    val borderColor = when {
-        isFocused -> Color.White
-        isPrimary -> Color(0x66FFFFFF)
-        else -> AbyssBorderHairline
-    }
     val contentColor = when {
-        isFocused -> Color.Black
-        else -> AbyssTextPrimary
+        isFocused -> Color(0xFF1E222B)
+        else -> Color.White
     }
 
     Box(
@@ -1314,14 +1293,9 @@ private fun OsdPillButton(
             }
             .clip(RoundedCornerShape(50))
             .background(bgColor)
-            .border(
-                1.dp,
-                borderColor,
-                RoundedCornerShape(50)
-            )
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }
-            .padding(horizontal = if (label.isEmpty()) 10.dp else 16.dp, vertical = 8.dp),
+            .padding(horizontal = if (label.isEmpty()) 12.dp else 16.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
