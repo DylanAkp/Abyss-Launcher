@@ -16,8 +16,10 @@ nav3Core = "1.0.1"
 lifecycleViewmodelNav3 = "2.10.0"
 media3 = "1.5.1"
 coil = "2.7.0"
+profileinstaller = "1.4.1"
 
 [libraries]
+androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "profileinstaller" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidxActivity" }
