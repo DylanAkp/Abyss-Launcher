@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -239,8 +240,17 @@ fun AppCard(
                                 contentScale = ContentScale.Fit
                             )
                         } else {
+                            val context = LocalContext.current
+                            val iconRequest = remember(app.icon) {
+                                coil.request.ImageRequest.Builder(context)
+                                    .data(app.icon)
+                                    .size(108, 108)
+                                    .precision(coil.size.Precision.INEXACT)
+                                    .allowHardware(true)
+                                    .build()
+                            }
                             AsyncImage(
-                                model = app.icon,
+                                model = iconRequest,
                                 contentDescription = app.label,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Fit

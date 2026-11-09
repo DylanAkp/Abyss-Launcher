@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -141,8 +142,17 @@ fun MediaContextMenu(
                     ) {
                         // Poster thumbnail
                         if (media.posterUrl.isNotBlank()) {
+                            val context = LocalContext.current
+                            val thumbRequest = remember(media.posterUrl) {
+                                coil.request.ImageRequest.Builder(context)
+                                    .data(media.posterUrl)
+                                    .size(96, 144)
+                                    .precision(coil.size.Precision.INEXACT)
+                                    .allowHardware(true)
+                                    .build()
+                            }
                             AsyncImage(
-                                model = media.posterUrl,
+                                model = thumbRequest,
                                 contentDescription = media.title(),
                                 modifier = Modifier
                                     .width(48.dp)
