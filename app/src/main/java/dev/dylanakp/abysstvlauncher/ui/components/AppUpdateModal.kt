@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -100,7 +99,6 @@ fun AppUpdateModal(
                     .width(540.dp)
                     .clip(RoundedCornerShape(24.dp))
                     .background(AbyssSurfaceGlassElevated)
-                    .border(1.dp, Color(0x337C5CFF), RoundedCornerShape(24.dp))
                     .padding(28.dp)
             ) {
                 Column(
@@ -115,8 +113,7 @@ fun AppUpdateModal(
                             modifier = Modifier
                                 .size(40.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0x337C5CFF))
-                                .border(1.dp, Color(0x667C5CFF), RoundedCornerShape(12.dp)),
+                                .background(Color(0x337C5CFF)),
                             contentAlignment = Alignment.Center
                         ) {
                             AbyssIcon(
@@ -165,7 +162,6 @@ fun AppUpdateModal(
                                 .heightIn(max = 140.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(Color(0x1AFFFFFF))
-                                .border(0.5.dp, AbyssBorderHairline, RoundedCornerShape(12.dp))
                                 .padding(12.dp)
                                 .verticalScroll(rememberScrollState())
                         ) {
@@ -208,7 +204,6 @@ fun AppUpdateModal(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(Color(0x33EF4444))
-                                .border(1.dp, Color(0x66EF4444), RoundedCornerShape(8.dp))
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                         ) {
                             Text(
@@ -286,15 +281,6 @@ private fun UpdateModalButton(
                     isPrimary -> Color(0x447C5CFF)
                     else -> Color(0x18FFFFFF)
                 }
-            )
-            .border(
-                1.dp,
-                when {
-                    isFocused -> Color.White
-                    isPrimary -> Color(0x887C5CFF)
-                    else -> AbyssBorderHairline
-                },
-                RoundedCornerShape(12.dp)
             )
             .onFocusChanged { isFocused = it.isFocused }
             .onPreviewKeyEvent { event ->

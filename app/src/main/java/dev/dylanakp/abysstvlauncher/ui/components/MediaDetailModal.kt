@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -88,7 +87,6 @@ fun MediaDetailModal(
                     .fillMaxHeight(0.72f)
                     .clip(RoundedCornerShape(20.dp))
                     .background(AbyssSurfaceGlassElevated)
-                    .border(1.dp, AbyssBorderHairline, RoundedCornerShape(20.dp))
                     .clickable(enabled = false) {}
             ) {
                 Row(
@@ -229,7 +227,6 @@ fun MediaDetailModal(
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(Color(0x2206B6D4))
-                                        .border(1.dp, Color(0x5506B6D4), RoundedCornerShape(10.dp))
                                         .padding(12.dp)
                                     ) {
                                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -365,15 +362,6 @@ private fun ModalActionButton(
                     isPrimary -> Color(0x337C5CFF)
                     else -> Color(0x18FFFFFF)
                 }
-            )
-            .border(
-                1.dp,
-                when {
-                    isFocused -> Color.White
-                    isPrimary -> Color(0x777C5CFF)
-                    else -> AbyssBorderHairline
-                },
-                RoundedCornerShape(50)
             )
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }

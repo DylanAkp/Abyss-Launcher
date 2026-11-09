@@ -3,7 +3,6 @@ package dev.dylanakp.abysstvlauncher.ui.components
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -148,7 +147,6 @@ fun CategoryCatalogScreen(
                     .height(42.dp)
                     .clip(RoundedCornerShape(50))
                     .background(AbyssPillGlass)
-                    .border(1.dp, AbyssBorderHairline, RoundedCornerShape(50))
                     .padding(horizontal = 14.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
@@ -253,7 +251,6 @@ private fun CatalogBackButton(
             .focusRequester(focusRequester)
             .clip(RoundedCornerShape(50))
             .background(if (isFocused) Color.White else AbyssPillGlass)
-            .border(1.dp, if (isFocused) Color.White else AbyssBorderHairline, RoundedCornerShape(50))
             .onFocusChanged { isFocused = it.isFocused }
             .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&

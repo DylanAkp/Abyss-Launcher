@@ -12,7 +12,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -522,11 +521,6 @@ private fun DetailedEpisodeCard(
         ),
         label = "epCardScale"
     )
-    val borderColor by animateColorAsState(
-        targetValue = if (isFocused) Color.White else AbyssBorderHairline,
-        animationSpec = tween(120),
-        label = "epCardBorder"
-    )
     val bgColor by animateColorAsState(
         targetValue = if (isFocused) Color.White else AbyssSurfaceGlass,
         animationSpec = tween(120),
@@ -546,7 +540,6 @@ private fun DetailedEpisodeCard(
             }
             .clip(RoundedCornerShape(12.dp))
             .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
             .onFocusChanged { isFocused = it.isFocused }
             .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
@@ -599,7 +592,6 @@ private fun DetailedEpisodeCard(
                     .height(94.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(AbyssVoid)
-                    .border(1.dp, AbyssBorderHairline, RoundedCornerShape(8.dp))
             ) {
                 AbyssMediaArtwork(
                     imageUrl = episode.posterUrl.ifBlank { seriesBackdropFallback },
@@ -637,7 +629,6 @@ private fun DetailedEpisodeCard(
                             .align(Alignment.TopEnd)
                             .clip(RoundedCornerShape(4.dp))
                             .background(Color(0xDD000000))
-                            .border(1.dp, AbyssGold.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Row(
@@ -669,8 +660,7 @@ private fun DetailedEpisodeCard(
                             .align(Alignment.Center)
                             .size(32.dp)
                             .clip(RoundedCornerShape(50))
-                            .background(Color(0xCC000000))
-                            .border(1.dp, Color.White, RoundedCornerShape(50)),
+                            .background(Color(0xCC000000)),
                         contentAlignment = Alignment.Center
                     ) {
                         AbyssIcon(
@@ -846,11 +836,6 @@ private fun SeriesActionPill(
             }
             .clip(RoundedCornerShape(50))
             .background(bgColor)
-            .border(
-                width = 1.dp,
-                color = if (isFocused || isPrimary) Color.White else AbyssBorderHairline,
-                shape = RoundedCornerShape(50)
-            )
             .onFocusChanged {
                 isFocused = it.isFocused
                 if (it.isFocused) onFocused?.invoke()
@@ -963,7 +948,6 @@ fun EpisodeContextMenu(
                     .width(420.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(AbyssSurfaceGlassElevated)
-                    .border(1.dp, AbyssBorderHairline, RoundedCornerShape(14.dp))
                     .clickable(enabled = false) {}
                     .padding(22.dp)
             ) {
@@ -1045,11 +1029,6 @@ private fun EpisodeContextMenuItem(
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) Color.White else Color(0x14FFFFFF))
-            .border(
-                1.dp,
-                if (isFocused) Color.White else Color(0x1AFFFFFF),
-                RoundedCornerShape(8.dp)
-            )
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 11.dp)

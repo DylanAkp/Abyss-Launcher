@@ -7,7 +7,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -117,13 +116,12 @@ fun MediaContextMenu(
                 .clickable { onDismiss() },
             contentAlignment = Alignment.Center
         ) {
-            // Material 3.5 Expressive Sheet (Grouped container)
+            // Modal Sheet (Zero Outline)
             Box(
                 modifier = Modifier
                     .width(420.dp)
                     .clip(RoundedCornerShape(32.dp))
                     .background(Color(0xFF0F1420))
-                    .border(1.dp, Color(0x28FFFFFF), RoundedCornerShape(32.dp))
                     .clickable(enabled = false) {}
                     .padding(22.dp)
             ) {
@@ -137,7 +135,6 @@ fun MediaContextMenu(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(20.dp))
                             .background(Color(0xFF161B28))
-                            .border(1.dp, Color(0x18FFFFFF), RoundedCornerShape(20.dp))
                             .padding(14.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -222,13 +219,12 @@ fun MediaContextMenu(
                         }
                     }
 
-                    // Grouped actions container (M3 Expressive)
+                    // Grouped actions container
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(24.dp))
                             .background(Color(0xFF161B28))
-                            .border(1.dp, Color(0x18FFFFFF), RoundedCornerShape(24.dp))
                             .padding(6.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -332,8 +328,8 @@ private fun MediaContextMenuItem(
         label = "mediaItemScale"
     )
 
-    val contentColor = if (isFocused) Color(0xFF003354) else Color(0xFFF1F5F9)
-    val badgeBg = if (isFocused) Color(0xFF90CAF9) else Color(0x1FFFFFFF)
+    val contentColor = if (isFocused) Color(0xFF1E222B) else Color(0xFFF1F5F9)
+    val badgeBg = if (isFocused) Color(0x1F000000) else Color(0x1FFFFFFF)
 
     Box(
         modifier = Modifier
@@ -346,19 +342,10 @@ private fun MediaContextMenuItem(
             .clip(RoundedCornerShape(18.dp))
             .background(
                 when {
-                    isFocused -> Color(0xFFC4E7FF)
+                    isFocused -> Color.White
                     isPrimary -> Color(0x223B82F6)
                     else -> Color(0x0EFFFFFF)
                 }
-            )
-            .border(
-                1.dp,
-                when {
-                    isFocused -> Color.White
-                    isPrimary -> Color(0x333B82F6)
-                    else -> Color(0x12FFFFFF)
-                },
-                RoundedCornerShape(18.dp)
             )
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }

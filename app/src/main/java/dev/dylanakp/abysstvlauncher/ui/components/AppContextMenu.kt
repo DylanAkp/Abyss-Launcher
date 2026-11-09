@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -111,7 +110,7 @@ fun AppContextMenu(
                 .clickable { onDismiss() },
             contentAlignment = Alignment.Center
         ) {
-            // Material 3.5 Expressive Modal Sheet
+            // Modal Sheet (Zero Outline)
             Box(
                 modifier = Modifier
                     .width(380.dp)
@@ -123,16 +122,6 @@ fun AppContextMenu(
                                 Color(0xFF131620)
                             )
                         )
-                    )
-                    .border(
-                        1.5.dp,
-                        Brush.verticalGradient(
-                            listOf(
-                                Color(0x38FFFFFF),
-                                Color(0x0FFFFFFF)
-                            )
-                        ),
-                        RoundedCornerShape(32.dp)
                     )
                     .clickable(enabled = false) {}
                     .padding(22.dp)
@@ -147,7 +136,6 @@ fun AppContextMenu(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(20.dp))
                             .background(Color(0x14FFFFFF))
-                            .border(1.dp, Color(0x18FFFFFF), RoundedCornerShape(20.dp))
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -283,8 +271,8 @@ private fun ContextMenuItem(
         label = "menuItemScale"
     )
 
-    val contentColor = if (isFocused) Color(0xFF003354) else Color(0xFFF1F5F9)
-    val badgeBg = if (isFocused) Color(0xFF90CAF9) else Color(0x1FFFFFFF)
+    val contentColor = if (isFocused) Color(0xFF1E222B) else Color(0xFFF1F5F9)
+    val badgeBg = if (isFocused) Color(0x1F000000) else Color(0x1FFFFFFF)
 
     Box(
         modifier = Modifier
@@ -297,19 +285,10 @@ private fun ContextMenuItem(
             .clip(RoundedCornerShape(18.dp))
             .background(
                 when {
-                    isFocused -> Color(0xFFC4E7FF)
+                    isFocused -> Color.White
                     isPrimary -> Color(0x24FFFFFF)
                     else -> Color(0x12FFFFFF)
                 }
-            )
-            .border(
-                1.dp,
-                when {
-                    isFocused -> Color.White
-                    isPrimary -> Color(0x33FFFFFF)
-                    else -> Color(0x14FFFFFF)
-                },
-                RoundedCornerShape(18.dp)
             )
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }
