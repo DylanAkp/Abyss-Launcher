@@ -7,10 +7,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,8 +22,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.relocation.BringIntoViewResponder
@@ -34,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -98,6 +101,7 @@ fun MainScreen(
     }
     BackHandler(enabled = state.isSearchActive) {
         viewModel.setSearchActive(false)
+        viewModel.selectTab(AbyssNavTab.HOME)
     }
     BackHandler(enabled = state.selectedMediaForDetails != null) {
         viewModel.closeMediaDetails()
@@ -200,9 +204,11 @@ fun MainScreen(
     val contentFirstFocusRequester = remember { FocusRequester() }
     val searchFirstKeyFocusRequester = remember { FocusRequester() }
     val mainListState = rememberLazyListState()
+    val appsGridState = rememberLazyGridState()
 
     LaunchedEffect(state.selectedTab) {
         mainListState.scrollToItem(0)
+        appsGridState.scrollToItem(0)
     }
 
     val navigateToTopBar: () -> Unit = {
@@ -212,9 +218,51 @@ fun MainScreen(
         Unit
     }
 
+    val navigateToTopBarFromCatalog: () -> Unit = {
+        coroutineScope.launch {
+            if (mainListState.firstVisibleItemIndex > 0 || mainListState.firstVisibleItemScrollOffset > 0) {
+                mainListState.animateScrollToItem(0, 0)
+            } else {
+                try { topBarFocusRequester.requestFocus() } catch (_: Exception) {}
+            }
+        }
+        Unit
+    }
+
+    val onTopRowFocused: (MediaItem) -> Unit = {
+        coroutineScope.launch {
+            if (mainListState.firstVisibleItemIndex > 0 || mainListState.firstVisibleItemScrollOffset > 0) {
+                mainListState.animateScrollToItem(0, 0)
+            }
+        }
+    }
+
+    val navigateToTopBarFromApps: () -> Unit = {
+        coroutineScope.launch {
+            if (appsGridState.firstVisibleItemIndex > 0 || appsGridState.firstVisibleItemScrollOffset > 0) {
+                appsGridState.animateScrollToItem(0, 0)
+            } else {
+                try { topBarFocusRequester.requestFocus() } catch (_: Exception) {}
+            }
+        }
+        Unit
+    }
+
+    val onTopRowAppFocused: () -> Unit = {
+        coroutineScope.launch {
+            if (appsGridState.firstVisibleItemIndex > 0 || appsGridState.firstVisibleItemScrollOffset > 0) {
+                appsGridState.animateScrollToItem(0, 0)
+            }
+        }
+    }
+
     val onNavigateDownFromTopBar: () -> Unit = {
         coroutineScope.launch {
-            if (state.selectedTab == AbyssNavTab.HOME && state.activeHeroItem != null) {
+            if (state.isSearchActive) {
+                try {
+                    searchFirstKeyFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            } else if (state.selectedTab == AbyssNavTab.HOME && state.activeHeroItem != null) {
                 try {
                     heroPlayFocusRequester.requestFocus()
                 } catch (_: Exception) {
@@ -363,27 +411,23 @@ fun MainScreen(
                 }
             )
         } else if (state.selectedTab == AbyssNavTab.APPS) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Spacer(modifier = Modifier.height(65.dp))
-
-                AppsGridView(
-                    allApps = state.visibleApps,
-                    hiddenApps = state.hiddenAppsList,
-                    showHiddenApps = state.showHiddenApps,
-                    firstItemFocusRequester = contentFirstFocusRequester,
-                    onNavigateUp = {
-                        try { topBarFocusRequester.requestFocus() } catch (_: Exception) {}
-                    },
-                    onAppClick = { app ->
-                        if (!SystemAppHelper.launchApp(context, app.packageName)) {
-                            Toast.makeText(context, "Cannot launch ${app.label}", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    onAppLongClick = { app ->
-                        viewModel.openAppContextMenu(app)
+            AppsGridView(
+                allApps = state.visibleApps,
+                hiddenApps = state.hiddenAppsList,
+                showHiddenApps = state.showHiddenApps,
+                gridState = appsGridState,
+                firstItemFocusRequester = contentFirstFocusRequester,
+                onNavigateUp = navigateToTopBarFromApps,
+                onTopRowFocused = onTopRowAppFocused,
+                onAppClick = { app ->
+                    if (!SystemAppHelper.launchApp(context, app.packageName)) {
+                        Toast.makeText(context, "Cannot launch ${app.label}", Toast.LENGTH_SHORT).show()
                     }
-                )
-            }
+                },
+                onAppLongClick = { app ->
+                    viewModel.openAppContextMenu(app)
+                }
+            )
         } else {
             LazyColumn(
                 state = mainListState,
@@ -579,10 +623,10 @@ fun MainScreen(
                                     title = stringResource(R.string.row_seer_requests),
                                     items = state.seerRequests,
                                     firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBar else null,
+                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
                                     onItemClick = playMediaItem,
                                     onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus
+                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus
                                 )
                             }
                         }
@@ -596,10 +640,10 @@ fun MainScreen(
                                     title = title,
                                     items = state.seerTrending,
                                     firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBar else null,
+                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
                                     onItemClick = playMediaItem,
                                     onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus,
+                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
                                     onSeeMoreClick = { viewModel.openFullCategory(title, "seer_trending") }
                                 )
                             }
@@ -614,10 +658,10 @@ fun MainScreen(
                                     title = title,
                                     items = state.seerPopularMovies,
                                     firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBar else null,
+                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
                                     onItemClick = playMediaItem,
                                     onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus,
+                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
                                     onSeeMoreClick = { viewModel.openFullCategory(title, "seer_movies") }
                                 )
                             }
@@ -632,10 +676,10 @@ fun MainScreen(
                                     title = title,
                                     items = state.seerPopularTv,
                                     firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBar else null,
+                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
                                     onItemClick = playMediaItem,
                                     onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus,
+                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
                                     onSeeMoreClick = { viewModel.openFullCategory(title, "seer_tv") }
                                 )
                             }
@@ -650,10 +694,10 @@ fun MainScreen(
                                     title = stringResource(R.string.row_continue_watching),
                                     items = continueWatchingMoviesFiltered,
                                     firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBar else null,
+                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
                                     onItemClick = playMediaItem,
                                     onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus
+                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus
                                 )
                             }
                         }
@@ -666,10 +710,10 @@ fun MainScreen(
                                     title = title,
                                     items = state.moviesTop100,
                                     firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBar else null,
+                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
                                     onItemClick = playMediaItem,
                                     onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus,
+                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
                                     onSeeMoreClick = { viewModel.openFullCategory(title, "movies_top") }
                                 )
                             }
@@ -683,10 +727,10 @@ fun MainScreen(
                                     title = title,
                                     items = state.moviesNouveautes,
                                     firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBar else null,
+                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
                                     onItemClick = playMediaItem,
                                     onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus,
+                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
                                     onSeeMoreClick = { viewModel.openFullCategory(title, "movies_nouv") }
                                 )
                             }
@@ -700,10 +744,10 @@ fun MainScreen(
                                     title = title,
                                     items = state.movies.take(30),
                                     firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBar else null,
+                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
                                     onItemClick = playMediaItem,
                                     onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus,
+                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
                                     onSeeMoreClick = { viewModel.openCatalog(title, state.movies) }
                                 )
                             }
@@ -718,10 +762,10 @@ fun MainScreen(
                                     title = stringResource(R.string.row_continue_watching),
                                     items = continueWatchingSeriesFiltered,
                                     firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBar else null,
+                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
                                     onItemClick = playMediaItem,
                                     onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus
+                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus
                                 )
                             }
                         }
@@ -734,10 +778,10 @@ fun MainScreen(
                                     title = title,
                                     items = state.seriesTop100,
                                     firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBar else null,
+                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
                                     onItemClick = playMediaItem,
                                     onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus,
+                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
                                     onSeeMoreClick = { viewModel.openFullCategory(title, "series_top") }
                                 )
                             }
@@ -751,10 +795,10 @@ fun MainScreen(
                                     title = title,
                                     items = state.seriesNouveautes,
                                     firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBar else null,
+                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
                                     onItemClick = playMediaItem,
                                     onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus,
+                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
                                     onSeeMoreClick = { viewModel.openFullCategory(title, "series_nouv") }
                                 )
                             }
@@ -768,10 +812,10 @@ fun MainScreen(
                                     title = title,
                                     items = state.series.take(30),
                                     firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBar else null,
+                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
                                     onItemClick = playMediaItem,
                                     onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus,
+                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
                                     onSeeMoreClick = { viewModel.openCatalog(title, state.series) }
                                 )
                             }
@@ -811,7 +855,7 @@ fun MainScreen(
                     }
                 }
             } else null,
-            onToggleSearch = { viewModel.setSearchActive(!state.isSearchActive) },
+            onOpenSearch = { viewModel.setSearchActive(true) },
             onToggleLanguageQuick = {
                 viewModel.setLanguage(if (state.language == AppLanguage.FR) AppLanguage.EN else AppLanguage.FR)
             },
@@ -834,7 +878,6 @@ fun MainScreen(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
                         .background(Color(0xE6141722))
-                        .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(50))
                         .clickable { viewModel.clearStatusMessage() }
                         .padding(horizontal = 20.dp, vertical = 9.dp)
                 ) {
@@ -999,29 +1042,35 @@ private fun AppsGridView(
     allApps: List<TvAppInfo>,
     hiddenApps: List<TvAppInfo>,
     showHiddenApps: Boolean,
+    gridState: LazyGridState,
     onAppClick: (TvAppInfo) -> Unit,
     onAppLongClick: (TvAppInfo) -> Unit,
     firstItemFocusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null
+    onNavigateUp: (() -> Unit)? = null,
+    onTopRowFocused: (() -> Unit)? = null
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 8.dp)
-    ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val totalAvailableWidth = maxWidth - 64.dp
+        val minCardWidth = 170.dp
+        val spacing = 14.dp
+        val columnsCount = maxOf(1, ((totalAvailableWidth + spacing) / (minCardWidth + spacing)).toInt())
+
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 170.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            state = gridState,
+            columns = GridCells.Adaptive(minSize = minCardWidth),
+            horizontalArrangement = Arrangement.spacedBy(spacing),
             verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(top = 16.dp, bottom = 40.dp),
+            contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 72.dp, bottom = 40.dp),
             modifier = Modifier.fillMaxSize()
         ) {
             val list = if (showHiddenApps) (allApps + hiddenApps) else allApps
             itemsIndexed(list, key = { _, it -> it.packageName }) { index, app ->
+                val isTopRow = index < columnsCount
                 AppCard(
                     app = app,
                     focusRequester = if (index == 0) firstItemFocusRequester else null,
-                    onNavigateUp = if (index < 6) onNavigateUp else null,
+                    onNavigateUp = if (isTopRow) onNavigateUp else null,
+                    onFocus = if (isTopRow) onTopRowFocused else null,
                     onClick = { onAppClick(app) },
                     onLongClick = { onAppLongClick(app) }
                 )
