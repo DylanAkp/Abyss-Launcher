@@ -114,6 +114,26 @@ fun SeriesDetailScreen(
     val currentSeason = seasons.getOrNull(selectedSeasonIndex)
     val episodes = currentSeason?.episodes.orEmpty()
 
+    // Helper to get unified progress combining local database history and server (Jellyfin) progress
+    fun getEpisodeProgress(ep: SeriesEpisode): Float {
+        val hist = playbackHistory[ep.id]
+        return when {
+            hist != null -> hist.progressPercent
+            ep.progressPercent > 0f -> ep.progressPercent
+            else -> 0f
+        }
+    }
+
+    fun getEpisodeSavedPosition(ep: SeriesEpisode): Long {
+        val hist = playbackHistory[ep.id]
+        val prog = getEpisodeProgress(ep)
+        return when {
+            hist != null && prog < 0.95f -> hist.positionMs
+            ep.savedPositionMs > 1_000L && prog < 0.95f -> ep.savedPositionMs
+            else -> 0L
+        }
+    }
+
     // Determine target episode to Continue or Start from S01E01
     val resumeTargetEpisode: Triple<SeriesEpisode, Long, Boolean>? = remember(seriesDetails, playbackHistory) {
         if (seasons.isEmpty()) null
@@ -125,25 +145,29 @@ fun SeriesDetailScreen(
                         it.episodeNumber == seriesResumeEntry.episodeNumber
                 }
                 if (matched != null) {
-                    val epHist = playbackHistory[matched.id] ?: seriesResumeEntry
-                    if (epHist.progressPercent >= 0.95f) {
+                    val progress = getEpisodeProgress(matched)
+                    val pos = getEpisodeSavedPosition(matched)
+                    if (progress >= 0.95f) {
                         // Episode was finished -> offer the next unwatched episode!
                         val idx = allEps.indexOfFirst { it.id == matched.id }
-                        val nextEp = allEps.drop(idx + 1).firstOrNull { (playbackHistory[it.id]?.progressPercent ?: 0f) < 0.95f }
-                            ?: allEps.firstOrNull { (playbackHistory[it.id]?.progressPercent ?: 0f) < 0.95f }
+                        val nextEp = allEps.drop(idx + 1).firstOrNull { getEpisodeProgress(it) < 0.95f }
+                            ?: allEps.firstOrNull { getEpisodeProgress(it) < 0.95f }
                             ?: matched
-                        Triple(nextEp, 0L, true)
+                        val nextPos = getEpisodeSavedPosition(nextEp)
+                        Triple(nextEp, nextPos, true)
                     } else {
-                        val pos = if (epHist.positionMs <= 1000L) 0L else epHist.positionMs
                         Triple(matched, pos, true)
                     }
                 } else {
-                    val firstUnwatched = allEps.firstOrNull { (playbackHistory[it.id]?.progressPercent ?: 0f) < 0.95f } ?: allEps.first()
-                    Triple(firstUnwatched, 0L, false)
+                    val inProgressEp = allEps.firstOrNull { getEpisodeProgress(it) in 0.01f..0.94f }
+                    val target = inProgressEp ?: allEps.firstOrNull { getEpisodeProgress(it) < 0.95f } ?: allEps.first()
+                    Triple(target, getEpisodeSavedPosition(target), inProgressEp != null)
                 }
             } else {
-                val firstUnwatched = allEps.firstOrNull { (playbackHistory[it.id]?.progressPercent ?: 0f) < 0.95f } ?: allEps.first()
-                Triple(firstUnwatched, 0L, false)
+                // If no local history entry for the series, check if Jellyfin server returned in-progress episode
+                val inProgressEp = allEps.firstOrNull { getEpisodeProgress(it) in 0.01f..0.94f }
+                val target = inProgressEp ?: allEps.firstOrNull { getEpisodeProgress(it) < 0.95f } ?: allEps.first()
+                Triple(target, getEpisodeSavedPosition(target), inProgressEp != null)
             }
         }
     }
@@ -443,9 +467,8 @@ fun SeriesDetailScreen(
 
                 // 3. DETAILED EPISODE CARDS LIST
                 itemsIndexed(episodes, key = { _, ep -> ep.id }) { idx, ep ->
-                    val hist = playbackHistory[ep.id]
-                    val progress = hist?.progressPercent ?: 0f
-                    val savedPos = if (hist != null && progress < 0.95f) hist.positionMs else 0L
+                    val progress = getEpisodeProgress(ep)
+                    val savedPos = getEpisodeSavedPosition(ep)
 
                     DetailedEpisodeCard(
                         episode = ep,
@@ -479,7 +502,7 @@ fun SeriesDetailScreen(
         EpisodeContextMenu(
             episode = episodeForMenu,
             seriesItem = seriesItem,
-            isWatched = (playbackHistory[episodeForMenu?.id]?.progressPercent ?: 0f) >= 0.95f,
+            isWatched = (episodeForMenu?.let { getEpisodeProgress(it) } ?: 0f) >= 0.95f,
             onDismiss = { episodeForMenu = null },
             onToggleSingleWatched = {
                 val targetEp = episodeForMenu ?: return@EpisodeContextMenu
