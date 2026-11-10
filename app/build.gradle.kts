@@ -2,6 +2,7 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
+  alias(libs.plugins.ksp)
 }
 
 val envFile = rootProject.file(".env")
@@ -134,6 +135,21 @@ dependencies {
 
   // Image Loading
   implementation(libs.coil.compose)
+
+  // Serialization
+  implementation(libs.kotlinx.serialization.json)
+
+  // Room Persistence
+  implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.room.ktx)
+  ksp(libs.androidx.room.compiler)
+
+  // Preferences DataStore
+  implementation(libs.androidx.datastore.preferences)
+
+  // Dependency Injection (Koin)
+  implementation(libs.koin.android)
+  implementation(libs.koin.androidx.compose)
 
   // Baseline Profiles / AOT compilation
   implementation(libs.androidx.profileinstaller)
