@@ -250,16 +250,16 @@ private fun TopBarSearchIconPill(
             }
             .clip(RoundedCornerShape(50))
             .background(bgColor)
-            .onFocusChanged {
-                isFocused = it.isFocused
-                if (it.isFocused && !isSelected) {
-                    onClick()
-                }
-            }
+            .onFocusChanged { isFocused = it.isFocused }
             .onPreviewKeyEvent { event ->
-                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
-                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_DOWN
-                ) {
+                val native = event.nativeKeyEvent
+                val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                        native.keyCode == KeyEvent.KEYCODE_ENTER ||
+                        native.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+                if (isSelectKey && native.action == KeyEvent.ACTION_UP) {
+                    onClick()
+                    true
+                } else if (native.action == KeyEvent.ACTION_DOWN && native.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                     onNavigateDown?.invoke()
                     true
                 } else {

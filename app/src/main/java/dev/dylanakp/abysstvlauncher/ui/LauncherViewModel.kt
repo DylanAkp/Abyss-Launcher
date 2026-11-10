@@ -1056,6 +1056,9 @@ class LauncherViewModel : ViewModel() {
         if (currentSession != null) {
             _uiState.update { it.copy(activePlayerSession = null) }
         }
+        if (_uiState.value.isSearchActive) {
+            setSearchActive(false)
+        }
         if (_uiState.value.selectedSeriesForEpisodes != null) {
             closeSeriesEpisodePicker()
         }
@@ -1477,20 +1480,29 @@ class LauncherViewModel : ViewModel() {
             _uiState.update { it.copy(isSearching = true) }
             val qLower = q.lowercase()
 
-            // 1. Local Jellyfin Movies & Series Search
-            val matchedMov = _uiState.value.movies.filter {
-                it.title.lowercase().contains(qLower) || it.localizedTitle.lowercase().contains(qLower)
-            }
-            val matchedSer = _uiState.value.series.filter {
-                it.title.lowercase().contains(qLower) || it.localizedTitle.lowercase().contains(qLower)
-            }
+            // 1. Direct Jellyfin Remote Search (or fallback to cached movies/series)
+            val jfConfig = _uiState.value.jellyfinConfig
+            val jfRemoteResults = if (jfConfig.isConfigured) {
+                JellyfinRepository.search(jfConfig, q)
+            } else emptyList()
+
+            val matchedMov = if (jfRemoteResults.isEmpty()) {
+                _uiState.value.movies.filter {
+                    it.title.lowercase().contains(qLower) || it.localizedTitle.lowercase().contains(qLower)
+                }
+            } else emptyList()
+            val matchedSer = if (jfRemoteResults.isEmpty()) {
+                _uiState.value.series.filter {
+                    it.title.lowercase().contains(qLower) || it.localizedTitle.lowercase().contains(qLower)
+                }
+            } else emptyList()
 
             // 2. Seer Search if configured
             val seerResults = if (_uiState.value.seerConfig.isConfigured) {
                 SeerRepository.search(_uiState.value.seerConfig, q)
             } else emptyList()
 
-            val combined = (matchedMov + matchedSer + seerResults).distinctBy { it.id }
+            val combined = (jfRemoteResults + matchedMov + matchedSer + seerResults).distinctBy { it.id }
 
             _uiState.update {
                 it.copy(

@@ -655,4 +655,90 @@ object JellyfinRepository {
         if (!config.isConfigured || itemId.isBlank() || userId.isBlank()) return@withContext
         httpDelete("$server/Users/$userId/PlayedItems/$itemId", config.accessToken)
     }
+
+    suspend fun search(config: JellyfinConfig, query: String): List<MediaItem> = withContext(Dispatchers.IO) {
+        val server = cleanUrl(config.serverUrl)
+        val userId = config.userId
+        val token = config.accessToken
+        if (!config.isConfigured || query.isBlank() || userId.isBlank()) return@withContext emptyList()
+
+        val encQuery = URLEncoder.encode(query.trim(), "UTF-8")
+        val fields = "Overview,Genres,CommunityRating,PremiereDate,ProductionYear,RunTimeTicks,PrimaryImageAspectRatio,ProviderIds,UserData"
+        val url = "$server/Users/$userId/Items?SearchTerm=$encQuery&IncludeItemTypes=Movie,Series&Recursive=true&Limit=30&Fields=$fields"
+
+        val raw = httpGet(url, token) ?: return@withContext emptyList()
+        val results = mutableListOf<MediaItem>()
+        try {
+            val root = JSONObject(raw)
+            val arr = root.optJSONArray("Items") ?: return@withContext emptyList()
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val id = obj.optString("Id", "")
+                if (id.isBlank()) continue
+                val type = obj.optString("Type", "")
+                val category = if (type.equals("Series", ignoreCase = true)) MediaCategory.SERIES else MediaCategory.MOVIE
+                val name = obj.optString("Name", "")
+                val overview = obj.optString("Overview", "")
+                val year = obj.optInt("ProductionYear", 0).let { if (it > 0) it.toString() else "" }
+                val rating = obj.optDouble("CommunityRating", 0.0).let { if (it > 0.0) String.format(java.util.Locale.US, "%.1f", it) else "" }
+
+                val runTimeTicks = obj.optLong("RunTimeTicks", 0L)
+                val durationMs = runTimeTicks / 10_000L
+                val durationStr = if (durationMs > 0L) {
+                    val m = durationMs / 60_000L
+                    "${m / 60}h ${m % 60}m"
+                } else ""
+
+                val userData = obj.optJSONObject("UserData")
+                val played = userData?.optBoolean("Played", false) ?: false
+                val posTicks = userData?.optLong("PlaybackPositionTicks", 0L) ?: 0L
+                val posMs = posTicks / 10_000L
+                val progress = when {
+                    played -> 1.0f
+                    durationMs > 0L && posMs > 0L -> (posMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                    else -> 0f
+                }
+
+                val genresArr = obj.optJSONArray("Genres")
+                val groupTitle = if (genresArr != null && genresArr.length() > 0) {
+                    genresArr.optString(0, if (category == MediaCategory.SERIES) "Séries" else "Films")
+                } else if (category == MediaCategory.SERIES) "Séries" else "Films"
+
+                val providerIds = obj.optJSONObject("ProviderIds")
+                val tmdbId = providerIds?.optInt("Tmdb", 0)?.let { if (it > 0) it else null }
+
+                val poster = "$server/Items/$id/Images/Primary?fillWidth=400&quality=90"
+                val backdrop = "$server/Items/$id/Images/Backdrop/0?fillWidth=1280&quality=85"
+                val streamUrl = if (category == MediaCategory.MOVIE) {
+                    "$server/Videos/$id/stream?static=true&api_key=$token&userId=$userId"
+                } else ""
+
+                results.add(
+                    MediaItem(
+                        id = id,
+                        title = name,
+                        localizedTitle = name,
+                        synopsis = overview,
+                        localizedSynopsis = overview,
+                        category = category,
+                        groupTitle = groupTitle,
+                        localizedGroupTitle = groupTitle,
+                        rating = rating,
+                        year = year,
+                        duration = durationStr,
+                        localizedDuration = durationStr,
+                        qualityBadge = "HD",
+                        audioBadge = "5.1",
+                        streamUrl = streamUrl,
+                        posterUrl = poster,
+                        backdropUrl = backdrop,
+                        progressPercent = progress,
+                        jellyfinId = id,
+                        tmdbId = tmdbId
+                    )
+                )
+            }
+        } catch (_: Exception) {}
+        results
+    }
 }

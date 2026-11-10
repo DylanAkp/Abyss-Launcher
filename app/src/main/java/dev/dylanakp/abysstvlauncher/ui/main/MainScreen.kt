@@ -206,6 +206,14 @@ fun MainScreen(
     val mainListState = rememberLazyListState()
     val appsGridState = rememberLazyGridState()
 
+    // Ensure initial focus targets Home Tab on launcher startup
+    LaunchedEffect(Unit) {
+        delay(150L)
+        try {
+            topBarFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
+
     LaunchedEffect(state.selectedTab) {
         mainListState.scrollToItem(0)
         appsGridState.scrollToItem(0)

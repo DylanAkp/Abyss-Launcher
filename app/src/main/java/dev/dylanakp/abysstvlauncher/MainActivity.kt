@@ -82,6 +82,9 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         viewModel.refreshInstalledApps(this)
         viewModel.onActivityResumed()
+        if (intent?.hasCategory(Intent.CATEGORY_HOME) == true || intent?.action == Intent.ACTION_MAIN) {
+            viewModel.handleHomePressed()
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
