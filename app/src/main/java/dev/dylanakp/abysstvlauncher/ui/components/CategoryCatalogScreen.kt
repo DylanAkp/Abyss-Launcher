@@ -85,9 +85,8 @@ fun CategoryCatalogScreen(
         } else {
             val q = filterQuery.lowercase().trim()
             selection.items.filter {
-                it.localizedTitle.lowercase().contains(q) ||
-                    it.title.lowercase().contains(q) ||
-                    it.localizedGroupTitle.lowercase().contains(q) ||
+                it.title.lowercase().contains(q) ||
+                    it.groupTitle.lowercase().contains(q) ||
                     it.year.contains(q)
             }
         }

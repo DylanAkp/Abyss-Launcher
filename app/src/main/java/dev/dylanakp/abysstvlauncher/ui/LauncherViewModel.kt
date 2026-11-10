@@ -392,8 +392,7 @@ class LauncherViewModel : ViewModel() {
             val matchedSeries = state.series.firstOrNull {
                 it.id == item.id ||
                     (item.jellyfinId.isNotBlank() && it.jellyfinId == item.jellyfinId) ||
-                    TmdbRepository.titlesMatchSafely(it.title, item.title) ||
-                    TmdbRepository.titlesMatchSafely(it.localizedTitle, item.localizedTitle)
+                    TmdbRepository.titlesMatchSafely(it.title, item.title)
             }
             val target = matchedSeries ?: if (state.jellyfinConfig.isConfigured && (item.jellyfinId.isNotBlank() || item.id.isNotBlank())) {
                 item.copy(jellyfinId = item.jellyfinId.ifBlank { item.id })
@@ -414,8 +413,7 @@ class LauncherViewModel : ViewModel() {
             val matched = state.movies.firstOrNull {
                 it.id == item.id ||
                     (item.jellyfinId.isNotBlank() && it.jellyfinId == item.jellyfinId) ||
-                    TmdbRepository.titlesMatchSafely(it.title, item.title) ||
-                    TmdbRepository.titlesMatchSafely(it.localizedTitle, item.localizedTitle)
+                    TmdbRepository.titlesMatchSafely(it.title, item.title)
             }
             if (matched != null && matched.streamUrl.isNotBlank()) {
                 playableMovieItem = matched
@@ -541,7 +539,6 @@ class LauncherViewModel : ViewModel() {
                 mediaItem = MediaItem(
                     id = "trailer_${System.currentTimeMillis()}",
                     title = title,
-                    localizedTitle = title,
                     category = MediaCategory.MOVIE,
                     streamUrl = trailerUrl
                 ),
@@ -1592,12 +1589,12 @@ class LauncherViewModel : ViewModel() {
 
             val matchedMov = if (jfRemoteResults.isEmpty()) {
                 _uiState.value.movies.filter {
-                    it.title.lowercase().contains(qLower) || it.localizedTitle.lowercase().contains(qLower)
+                    it.title.lowercase().contains(qLower)
                 }
             } else emptyList()
             val matchedSer = if (jfRemoteResults.isEmpty()) {
                 _uiState.value.series.filter {
-                    it.title.lowercase().contains(qLower) || it.localizedTitle.lowercase().contains(qLower)
+                    it.title.lowercase().contains(qLower)
                 }
             } else emptyList()
 

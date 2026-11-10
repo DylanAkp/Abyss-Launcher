@@ -36,6 +36,17 @@
     <string name="movie_long_press_hint">Maintenir Lecture pour changer de version</string>
 
     <!-- Home & Category Rows -->
+    <string name="media_type_series">Série</string>
+    <string name="media_type_movie">Film</string>
+    <string name="media_type_cinema">Cinéma</string>
+    <string name="media_subtitle_with_year">%1$s • %2$s</string>
+    <string name="group_trending_series">Séries Tendances TMDB</string>
+    <string name="group_trending_movies">Films Tendances TMDB</string>
+    <string name="group_requests">Demandes en cours</string>
+    <string name="group_series">Séries</string>
+    <string name="group_movies">Films</string>
+    <string name="badge_resuming">REPRENDRE</string>
+    <string name="badge_next">SUIVANT</string>
     <string name="row_continue_watching">Reprendre</string>
     <string name="row_pinned_apps">Applications épinglées</string>
     <string name="row_trending_movies">Films tendances</string>
@@ -83,6 +94,7 @@
     <string name="details_status_available">Disponible dans Jellyfin</string>
     <string name="details_status_pending">En attente d\'approbation</string>
     <string name="details_status_processing">Téléchargement en cours…</string>
+    <string name="details_status_partially_available">Partiellement disponible</string>
     <string name="details_status_not_requested">Non disponible dans la bibliothèque</string>
     <string name="downloading_in_progress">Téléchargement en cours</string>
     <string name="download_eta">~%1$s restant</string>

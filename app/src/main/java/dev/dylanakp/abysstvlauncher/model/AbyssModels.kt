@@ -3,18 +3,22 @@ package dev.dylanakp.abysstvlauncher.model
 import android.graphics.drawable.Drawable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
+import kotlinx.serialization.Serializable
 
+@Serializable
 enum class AppLanguage(val code: String, val label: String) {
     AUTO("auto", "Auto (Système / System)"),
     FR("fr", "Français"),
     EN("en", "English")
 }
 
-enum class TemperatureUnit(val symbol: String, val label: String, val localizedLabel: String) {
-    CELSIUS("°C", "Celsius (°C)", "Celsius (°C)"),
-    FAHRENHEIT("°F", "Fahrenheit (°F)", "Fahrenheit (°F)")
+@Serializable
+enum class TemperatureUnit(val symbol: String) {
+    CELSIUS("°C"),
+    FAHRENHEIT("°F")
 }
 
+@Serializable
 enum class AbyssNavTab {
     HOME,
     MOVIES,
@@ -23,20 +27,20 @@ enum class AbyssNavTab {
     APPS
 }
 
+@Serializable
 enum class MediaCategory {
     MOVIE,
     SERIES,
     SEER_REQUEST
 }
 
-enum class SeerMediaStatus(val code: Int, val label: String, val localizedLabel: String) {
-    UNKNOWN(1, "Not in Library", "Non disponible"),
-    PENDING_APPROVAL(2, "Pending Approval", "En attente"),
-    PROCESSING(3, "Downloading…", "Téléchargement…"),
-    PARTIALLY_AVAILABLE(4, "Partially Available", "Partiellement disponible"),
-    AVAILABLE(5, "Available", "Disponible");
-
-    fun label(): String = if (java.util.Locale.getDefault().language.startsWith("fr")) localizedLabel else label
+@Serializable
+enum class SeerMediaStatus(val code: Int) {
+    UNKNOWN(1),
+    PENDING_APPROVAL(2),
+    PROCESSING(3),
+    PARTIALLY_AVAILABLE(4),
+    AVAILABLE(5);
 
     companion object {
         fun fromCode(code: Int): SeerMediaStatus = entries.find { it.code == code } ?: UNKNOWN
@@ -45,40 +49,30 @@ enum class SeerMediaStatus(val code: Int, val label: String, val localizedLabel:
 
 enum class AbyssAccentPreset(
     val id: String,
-    val label: String,
-    val localizedLabel: String,
     val primary: Color,
     val secondary: Color,
     val glow: Color
 ) {
     ABYSS_VIOLET(
         id = "abyss_violet",
-        label = "Abyss Violet (Default)",
-        localizedLabel = "Violet Abyss (Défaut)",
         primary = Color(0xFF7C5CFF),
         secondary = Color(0xFF38BDF8),
         glow = Color(0x667C5CFF)
     ),
     OCEANIC_CYAN(
         id = "oceanic_cyan",
-        label = "Bioluminescent Cyan",
-        localizedLabel = "Cyan Bioluminescent",
         primary = Color(0xFF06B6D4),
         secondary = Color(0xFF6366F1),
         glow = Color(0x6606B6D4)
     ),
     CRIMSON_CINEMA(
         id = "crimson_cinema",
-        label = "Crimson Cinema",
-        localizedLabel = "Cinéma Cramoisi",
         primary = Color(0xFFF43F5E),
         secondary = Color(0xFFFB923C),
         glow = Color(0x66F43F5E)
     ),
     EMERALD_AURORA(
         id = "emerald_aurora",
-        label = "Emerald Aurora",
-        localizedLabel = "Aurore Émeraude",
         primary = Color(0xFF10B981),
         secondary = Color(0xFF38BDF8),
         glow = Color(0x6610B981)
@@ -90,10 +84,11 @@ enum class AbyssAccentPreset(
     }
 }
 
-enum class PlayerPreference(val id: String, val label: String, val localizedLabel: String) {
-    ABYSS_INTERNAL("abyss_internal", "Abyss Player (Direct Play / ExoPlayer)", "Lecteur Abyss (Lecture directe / ExoPlayer)"),
-    EXTERNAL_PLAYER("external", "External Player (VLC / JustPlayer / Vimu)", "Lecteur externe (VLC / JustPlayer / Vimu)"),
-    SYSTEM_CHOOSER("chooser", "Always Ask (System Chooser)", "Toujours demander (Sélecteur Android)");
+@Serializable
+enum class PlayerPreference(val id: String) {
+    ABYSS_INTERNAL("abyss_internal"),
+    EXTERNAL_PLAYER("external"),
+    SYSTEM_CHOOSER("chooser");
 
     companion object {
         fun fromId(id: String): PlayerPreference =
@@ -102,6 +97,7 @@ enum class PlayerPreference(val id: String, val label: String, val localizedLabe
 }
 
 @Immutable
+@Serializable
 data class SeriesEpisode(
     val id: String,
     val seriesId: String,
@@ -120,6 +116,7 @@ data class SeriesEpisode(
 )
 
 @Immutable
+@Serializable
 data class SeriesSeason(
     val seasonNumber: Int,
     val name: String,
@@ -127,12 +124,14 @@ data class SeriesSeason(
 )
 
 @Immutable
+@Serializable
 data class SeriesDetails(
     val seriesItem: MediaItem,
     val seasons: List<SeriesSeason>
 )
 
 @Immutable
+@Serializable
 data class MediaVersion(
     val id: String,
     val name: String,
@@ -151,6 +150,7 @@ data class MediaVersion(
 }
 
 @Immutable
+@Serializable
 data class MovieDetails(
     val movieItem: MediaItem,
     val tagline: String = "",
@@ -163,6 +163,7 @@ data class MovieDetails(
 )
 
 @Immutable
+@Serializable
 data class PlaybackHistoryEntry(
     val itemId: String,
     val seriesId: String = "",
@@ -185,21 +186,17 @@ data class PlaybackHistoryEntry(
 }
 
 @Immutable
+@Serializable
 data class MediaItem(
     val id: String,
     val title: String,
-    val localizedTitle: String = title,
     val subtitle: String = "",
-    val localizedSubtitle: String = subtitle,
     val synopsis: String = "",
-    val localizedSynopsis: String = synopsis,
     val category: MediaCategory,
     val groupTitle: String = "",
-    val localizedGroupTitle: String = groupTitle,
     val rating: String = "8.6",
     val year: String = "2026",
-    val duration: String = "2h 14m",
-    val localizedDuration: String = duration,
+    val durationOrSeasons: String = "",
     val qualityBadge: String = "4K UHD",
     val audioBadge: String = "Atmos 7.1",
     val streamUrl: String = "",
@@ -217,11 +214,11 @@ data class MediaItem(
     val downloadEta: String? = null,
     val downloadSizeStr: String? = null
 ) {
-    fun title(isFrench: Boolean = java.util.Locale.getDefault().language.startsWith("fr")): String = if (isFrench && localizedTitle.isNotBlank()) localizedTitle else title
-    fun subtitle(isFrench: Boolean = java.util.Locale.getDefault().language.startsWith("fr")): String = if (isFrench && localizedSubtitle.isNotBlank()) localizedSubtitle else subtitle
-    fun synopsis(isFrench: Boolean = java.util.Locale.getDefault().language.startsWith("fr")): String = if (isFrench && localizedSynopsis.isNotBlank()) localizedSynopsis else synopsis
-    fun groupTitle(isFrench: Boolean = java.util.Locale.getDefault().language.startsWith("fr")): String = if (isFrench && localizedGroupTitle.isNotBlank()) localizedGroupTitle else groupTitle
-    fun duration(isFrench: Boolean = java.util.Locale.getDefault().language.startsWith("fr")): String = if (isFrench && localizedDuration.isNotBlank()) localizedDuration else duration
+    fun title(): String = title
+    fun subtitle(): String = subtitle
+    fun synopsis(): String = synopsis
+    fun groupTitle(): String = groupTitle
+    fun duration(): String = durationOrSeasons
 }
 
 @Immutable
@@ -238,6 +235,7 @@ data class TvAppInfo(
 )
 
 @Immutable
+@Serializable
 data class JellyfinConfig(
     val serverUrl: String = "",
     val username: String = "",
@@ -255,6 +253,7 @@ data class JellyfinConfig(
 }
 
 @Immutable
+@Serializable
 data class SeerConfig(
     val serverUrl: String = "",
     val apiKey: String = "",
@@ -266,6 +265,7 @@ data class SeerConfig(
 }
 
 @Immutable
+@Serializable
 data class SyncedLibrary(
     val movies: List<MediaItem> = emptyList(),
     val series: List<MediaItem> = emptyList(),

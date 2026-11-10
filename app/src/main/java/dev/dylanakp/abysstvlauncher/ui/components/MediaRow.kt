@@ -628,7 +628,7 @@ fun LiveChannelCard(
 
             // Channel Name
             Text(
-                text = item.localizedTitle.ifBlank { item.title },
+                text = item.title,
                 style = MaterialTheme.typography.titleSmall.copy(
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 11.sp

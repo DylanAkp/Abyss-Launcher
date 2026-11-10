@@ -21,10 +21,11 @@ import dev.dylanakp.abysstvlauncher.model.AppLanguage
 import dev.dylanakp.abysstvlauncher.theme.AbyssTVLauncherTheme
 import dev.dylanakp.abysstvlauncher.ui.LauncherViewModel
 import dev.dylanakp.abysstvlauncher.ui.main.MainScreen
+import org.koin.androidx.viewmodel.ext.android.viewModel
 
 class MainActivity : ComponentActivity() {
 
-    private val viewModel: LauncherViewModel by viewModels()
+    private val viewModel: LauncherViewModel by viewModel()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

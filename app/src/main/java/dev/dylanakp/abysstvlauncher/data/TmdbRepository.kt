@@ -1,6 +1,7 @@
 package dev.dylanakp.abysstvlauncher.data
 
 import dev.dylanakp.abysstvlauncher.BuildConfig
+import dev.dylanakp.abysstvlauncher.domain.repository.TmdbRepository as ITmdbRepository
 import dev.dylanakp.abysstvlauncher.model.MediaCategory
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.SeriesDetails
@@ -8,8 +9,13 @@ import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
 import dev.dylanakp.abysstvlauncher.model.SeriesSeason
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -17,14 +23,74 @@ import java.net.URL
 import java.text.Normalizer
 import java.util.Locale
 
-object TmdbRepository {
+@Serializable
+private data class TmdbTvDetailsDto(
+    val seasons: List<TmdbSeasonDto> = emptyList()
+)
+
+@Serializable
+private data class TmdbSeasonDto(
+    @SerialName("season_number") val seasonNumber: Int = -1,
+    val name: String = "",
+    @SerialName("episode_count") val episodeCount: Int = 0
+)
+
+@Serializable
+private data class TmdbSeasonDetailDto(
+    val episodes: List<TmdbEpisodeDto> = emptyList()
+)
+
+@Serializable
+private data class TmdbEpisodeDto(
+    @SerialName("episode_number") val episodeNumber: Int = 1,
+    val name: String = "",
+    val overview: String = "",
+    @SerialName("still_path") val stillPath: String? = null
+)
+
+@Serializable
+private data class TmdbPagedResultDto(
+    val results: List<TmdbMediaDto> = emptyList()
+)
+
+@Serializable
+private data class TmdbMediaDto(
+    val id: Int = 0,
+    @SerialName("media_type") val mediaType: String = "",
+    val title: String = "",
+    val name: String = "",
+    @SerialName("backdrop_path") val backdropPath: String? = null,
+    @SerialName("poster_path") val posterPath: String? = null,
+    @SerialName("release_date") val releaseDate: String = "",
+    @SerialName("first_air_date") val firstAirDate: String = "",
+    @SerialName("vote_average") val voteAverage: Double = 0.0,
+    val overview: String = ""
+)
+
+@Serializable
+private data class TmdbVideosResponseDto(
+    val results: List<TmdbVideoDto> = emptyList()
+)
+
+@Serializable
+private data class TmdbVideoDto(
+    val site: String = "",
+    val type: String = "",
+    val key: String = "",
+    val name: String = "Trailer"
+)
+
+object TmdbRepository : ITmdbRepository, KoinComponent {
+
+    private val client: OkHttpClient by inject()
+    private val json: Json by inject()
 
     private val API_KEY: String = BuildConfig.TMDB_API_KEY
     private const val BASE_URL = "https://api.themoviedb.org/3"
     private const val IMG_W1280 = "https://image.tmdb.org/t/p/w1280"
     private const val IMG_W780 = "https://image.tmdb.org/t/p/w780"
 
-    fun cleanTitleForMatching(raw: String): String {
+    override fun cleanTitleForMatching(raw: String): String {
         var t = Normalizer.normalize(raw, Normalizer.Form.NFD)
             .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
             .lowercase(Locale.ROOT)
@@ -48,7 +114,7 @@ object TmdbRepository {
         return t.replace(Regex("\\s+"), " ").trim()
     }
 
-    fun titlesMatchSafely(titleA: String, titleB: String): Boolean {
+    override fun titlesMatchSafely(titleA: String, titleB: String): Boolean {
         if (titleA.isBlank() || titleB.isBlank()) return false
         val a = cleanTitleForMatching(titleA)
         val b = cleanTitleForMatching(titleB)
@@ -65,43 +131,40 @@ object TmdbRepository {
         return false
     }
 
-    suspend fun fetchTrending(): List<MediaItem> = withContext(Dispatchers.IO) {
+    override suspend fun fetchTrending(): List<MediaItem> = withContext(Dispatchers.IO) {
         val lang = Locale.getDefault().toLanguageTag()
         val url = "$BASE_URL/trending/all/week?api_key=$API_KEY&language=$lang"
         val raw = httpGet(url) ?: return@withContext emptyList()
         parseTmdbResults(raw)
     }
 
-    suspend fun fetchPopularMovies(): List<MediaItem> = withContext(Dispatchers.IO) {
+    override suspend fun fetchPopularMovies(): List<MediaItem> = withContext(Dispatchers.IO) {
         val lang = Locale.getDefault().toLanguageTag()
         val url = "$BASE_URL/movie/popular?api_key=$API_KEY&language=$lang&page=1"
         val raw = httpGet(url) ?: return@withContext emptyList()
         parseTmdbResults(raw, forcedCategory = MediaCategory.MOVIE)
     }
 
-    suspend fun fetchPopularSeries(): List<MediaItem> = withContext(Dispatchers.IO) {
+    override suspend fun fetchPopularSeries(): List<MediaItem> = withContext(Dispatchers.IO) {
         val lang = Locale.getDefault().toLanguageTag()
         val url = "$BASE_URL/tv/popular?api_key=$API_KEY&language=$lang&page=1"
         val raw = httpGet(url) ?: return@withContext emptyList()
         parseTmdbResults(raw, forcedCategory = MediaCategory.SERIES)
     }
 
-    fun enrichWithJellyfinStreams(
+    override fun enrichWithJellyfinStreams(
         items: List<MediaItem>,
         jellyfinMovies: List<MediaItem>,
         jellyfinSeries: List<MediaItem>
     ): List<MediaItem> {
         return items.mapNotNull { item ->
-            if (item.title.isBlank() && item.localizedTitle.isBlank()) return@mapNotNull null
+            if (item.title.isBlank()) return@mapNotNull null
 
             val candidatePool = if (item.category == MediaCategory.SERIES) jellyfinSeries else jellyfinMovies
 
             val match = candidatePool.firstOrNull { jf ->
                 (item.tmdbId != null && jf.tmdbId != null && item.tmdbId == jf.tmdbId) ||
-                    titlesMatchSafely(jf.title, item.title) ||
-                    titlesMatchSafely(jf.localizedTitle, item.title) ||
-                    titlesMatchSafely(jf.title, item.localizedTitle) ||
-                    titlesMatchSafely(jf.localizedTitle, item.localizedTitle)
+                    titlesMatchSafely(jf.title, item.title)
             }
 
             if (match != null) {
@@ -119,7 +182,7 @@ object TmdbRepository {
         }
     }
 
-    suspend fun fetchSeriesDetailsFromTmdb(
+    override suspend fun fetchSeriesDetailsFromTmdb(
         tmdbId: Int,
         seriesItem: MediaItem
     ): SeriesDetails? = withContext(Dispatchers.IO) {
@@ -127,45 +190,37 @@ object TmdbRepository {
         val url = "$BASE_URL/tv/$tmdbId?api_key=$API_KEY&language=$lang"
         val raw = httpGet(url) ?: return@withContext null
         try {
-            val root = JSONObject(raw)
-            val seasonsArr = root.optJSONArray("seasons") ?: return@withContext null
+            val root = json.decodeFromString<TmdbTvDetailsDto>(raw)
             val seasonsList = mutableListOf<SeriesSeason>()
 
-            for (s in 0 until seasonsArr.length()) {
-                val sObj = seasonsArr.optJSONObject(s) ?: continue
-                val seasonNum = sObj.optInt("season_number", -1)
-                if (seasonNum <= 0) continue // Skip specials
-                val sName = sObj.optString("name", "Saison $seasonNum")
-                val epCount = sObj.optInt("episode_count", 0)
+            for (sObj in root.seasons) {
+                val seasonNum = sObj.seasonNumber
+                if (seasonNum <= 0) continue
+                val sName = sObj.name.ifBlank { "Saison $seasonNum" }
+                val epCount = sObj.episodeCount
 
                 val seasonUrl = "$BASE_URL/tv/$tmdbId/season/$seasonNum?api_key=$API_KEY&language=$lang"
                 val seasonRaw = httpGet(seasonUrl)
                 val epList = mutableListOf<SeriesEpisode>()
                 if (seasonRaw != null) {
-                    val seasonRoot = JSONObject(seasonRaw)
-                    val epsArr = seasonRoot.optJSONArray("episodes")
-                    if (epsArr != null) {
-                        for (e in 0 until epsArr.length()) {
-                            val eObj = epsArr.optJSONObject(e) ?: continue
-                            val epNum = eObj.optInt("episode_number", e + 1)
-                            val epName = eObj.optString("name", "Épisode $epNum")
-                            val epOverview = eObj.optString("overview", "")
-                            val stillPath = eObj.optString("still_path", "")
-                            val stillUrl = if (stillPath.isNotBlank()) "$IMG_W780$stillPath" else seriesItem.backdropUrl
+                    val seasonRoot = json.decodeFromString<TmdbSeasonDetailDto>(seasonRaw)
+                    seasonRoot.episodes.forEachIndexed { idx, eObj ->
+                        val epNum = if (eObj.episodeNumber > 0) eObj.episodeNumber else idx + 1
+                        val epName = eObj.name.ifBlank { "Épisode $epNum" }
+                        val stillUrl = eObj.stillPath?.takeIf { it.isNotBlank() }?.let { "$IMG_W780$it" } ?: seriesItem.backdropUrl
 
-                            epList.add(
-                                SeriesEpisode(
-                                    id = "tmdb_ep_${tmdbId}_${seasonNum}_${epNum}",
-                                    seriesId = seriesItem.id,
-                                    seasonNumber = seasonNum,
-                                    episodeNumber = epNum,
-                                    title = epName,
-                                    plot = epOverview,
-                                    streamUrl = seriesItem.streamUrl,
-                                    posterUrl = stillUrl
-                                )
+                        epList.add(
+                            SeriesEpisode(
+                                id = "tmdb_ep_${tmdbId}_${seasonNum}_${epNum}",
+                                seriesId = seriesItem.id,
+                                seasonNumber = seasonNum,
+                                episodeNumber = epNum,
+                                title = epName,
+                                plot = eObj.overview,
+                                streamUrl = seriesItem.streamUrl,
+                                posterUrl = stillUrl
                             )
-                        }
+                        )
                     }
                 }
 
@@ -214,59 +269,42 @@ object TmdbRepository {
     ): List<MediaItem> {
         val list = mutableListOf<MediaItem>()
         try {
-            val root = JSONObject(jsonString)
-            val results: JSONArray = root.optJSONArray("results") ?: return emptyList()
+            val root = json.decodeFromString<TmdbPagedResultDto>(jsonString)
 
-            for (i in 0 until results.length()) {
-                val obj = results.optJSONObject(i) ?: continue
-
-                val mediaType = obj.optString("media_type", "")
+            for (obj in root.results) {
+                val mediaType = obj.mediaType
                 val category = forcedCategory ?: if (mediaType == "tv") MediaCategory.SERIES else MediaCategory.MOVIE
 
-                val title = obj.optString("title", "").ifBlank { obj.optString("name", "") }.trim()
+                val title = obj.title.ifBlank { obj.name }.trim()
                 if (title.isBlank()) continue
 
-                val backdropPath = obj.optString("backdrop_path", "")
-                val posterPath = obj.optString("poster_path", "")
+                val backdropPath = obj.backdropPath.orEmpty()
+                val posterPath = obj.posterPath.orEmpty()
                 if (backdropPath.isBlank() && posterPath.isBlank()) continue
 
                 val backdropUrl = if (backdropPath.isNotBlank()) "$IMG_W1280$backdropPath" else "$IMG_W780$posterPath"
                 val posterUrl = if (posterPath.isNotBlank()) "$IMG_W780$posterPath" else backdropUrl
 
-                val releaseDate = obj.optString("release_date", "").ifBlank { obj.optString("first_air_date", "") }
+                val releaseDate = obj.releaseDate.ifBlank { obj.firstAirDate }
                 val year = releaseDate.take(4)
 
-                val voteAvg = obj.optDouble("vote_average", 0.0)
+                val voteAvg = obj.voteAverage
                 val rating = if (voteAvg > 0.0) String.format(Locale.US, "%.1f", voteAvg) else ""
 
-                val overview = obj.optString("overview", "").trim()
-                val tmdbId = obj.optInt("id", 0)
-
-                val groupTitle = when (category) {
-                    MediaCategory.SERIES -> "Trending TV Shows"
-                    else -> "Trending Movies"
-                }
-                val localizedGroupTitle = when (category) {
-                    MediaCategory.SERIES -> "Séries Tendances TMDB"
-                    else -> "Films Tendances TMDB"
-                }
+                val overview = obj.overview.trim()
+                val tmdbId = obj.id
 
                 list.add(
                     MediaItem(
                         id = "tmdb_${category.name.lowercase()}_$tmdbId",
                         title = title,
-                        localizedTitle = title,
-                        subtitle = if (year.isNotBlank()) "$year • ${if (category == MediaCategory.SERIES) "Series" else "Movie"}" else "Cinema",
-                        localizedSubtitle = if (year.isNotBlank()) "$year • ${if (category == MediaCategory.SERIES) "Série" else "Film"}" else "Cinéma",
+                        subtitle = year,
                         synopsis = overview,
-                        localizedSynopsis = overview,
                         category = category,
-                        groupTitle = groupTitle,
-                        localizedGroupTitle = localizedGroupTitle,
+                        groupTitle = "",
                         rating = rating,
                         year = year,
-                        duration = "",
-                        localizedDuration = "",
+                        durationOrSeasons = "",
                         qualityBadge = "4K HDR",
                         audioBadge = "5.1",
                         streamUrl = "",
@@ -279,22 +317,20 @@ object TmdbRepository {
         return list
     }
 
-    suspend fun fetchMovieTrailer(tmdbId: Int): Pair<String, String>? = withContext(Dispatchers.IO) {
+    override suspend fun fetchMovieTrailer(tmdbId: Int): Pair<String, String>? = withContext(Dispatchers.IO) {
         if (API_KEY.isBlank() || tmdbId <= 0) return@withContext null
         val lang = Locale.getDefault().toLanguageTag()
         val url = "$BASE_URL/movie/$tmdbId/videos?api_key=$API_KEY&language=$lang"
         val raw = httpGet(url) ?: httpGet("$BASE_URL/movie/$tmdbId/videos?api_key=$API_KEY&language=en-US") ?: return@withContext null
         try {
-            val root = JSONObject(raw)
-            val results = root.optJSONArray("results") ?: return@withContext null
+            val root = json.decodeFromString<TmdbVideosResponseDto>(raw)
             var fallbackKey: String? = null
             var fallbackName = "Trailer"
-            for (i in 0 until results.length()) {
-                val obj = results.optJSONObject(i) ?: continue
-                val site = obj.optString("site", "")
-                val type = obj.optString("type", "")
-                val key = obj.optString("key", "")
-                val name = obj.optString("name", "Trailer")
+            for (obj in root.results) {
+                val site = obj.site
+                val type = obj.type
+                val key = obj.key
+                val name = obj.name
                 if (site.equals("YouTube", ignoreCase = true) && key.isNotBlank()) {
                     if (type.equals("Trailer", ignoreCase = true)) {
                         return@withContext Pair("https://www.youtube.com/watch?v=$key", name)
@@ -318,23 +354,15 @@ object TmdbRepository {
     }
 
     private fun httpGet(urlStr: String): String? {
-        var conn: HttpURLConnection? = null
         return try {
-            val url = URL(urlStr)
-            conn = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 7000
-                readTimeout = 8000
-                requestMethod = "GET"
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Android TV; Abyss)")
-                setRequestProperty("Accept", "application/json")
-            }
-            if (conn.responseCode in 200..299) {
-                BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { it.readText() }
-            } else null
+            val req = Request.Builder()
+                .url(urlStr)
+                .header("Accept", "application/json")
+                .build()
+            val resp = client.newCall(req).execute()
+            if (resp.isSuccessful) resp.body?.string() else null
         } catch (_: Exception) {
             null
-        } finally {
-            conn?.disconnect()
         }
     }
 }

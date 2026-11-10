@@ -6,9 +6,11 @@ import androidx.core.content.FileProvider
 import dev.dylanakp.abysstvlauncher.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -22,11 +24,30 @@ data class AppUpdate(
     val apkSize: Long
 )
 
+@Serializable
+private data class GitHubReleaseDto(
+    @SerialName("tag_name") val tagName: String = "",
+    val body: String = "",
+    val assets: List<GitHubAssetDto> = emptyList()
+)
+
+@Serializable
+private data class GitHubAssetDto(
+    val name: String = "",
+    @SerialName("browser_download_url") val downloadUrl: String = "",
+    val size: Long = 0L
+)
+
 object AppUpdateRepository {
 
     private const val REPO_OWNER = "DylanAkp"
     private const val REPO_NAME = "Abyss-Launcher"
     private const val LATEST_RELEASE_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+    }
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -63,15 +84,14 @@ object AppUpdateRepository {
             val body = response.body?.string().orEmpty()
             if (body.isBlank()) return@runCatching null
 
-            val json = JSONObject(body)
-            val tagName = json.optString("tag_name", "").trim()
+            val release = json.decodeFromString<GitHubReleaseDto>(body)
+            val tagName = release.tagName.trim()
             if (tagName.isBlank()) return@runCatching null
 
             val cleanTag = tagName.removePrefix("v").removePrefix("V")
             val latestVersionCode = parseVersionCode(cleanTag)
             val currentVersionCode = BuildConfig.VERSION_CODE
 
-            // Check if remote version is strictly newer
             val isNewer = if (latestVersionCode > 0 && currentVersionCode > 0) {
                 latestVersionCode > currentVersionCode
             } else {
@@ -80,30 +100,16 @@ object AppUpdateRepository {
 
             if (!isNewer) return@runCatching null
 
-            val assets = json.optJSONArray("assets") ?: return@runCatching null
-            var apkUrl: String? = null
-            var apkSize = 0L
-
-            for (i in 0 until assets.length()) {
-                val asset = assets.getJSONObject(i)
-                val name = asset.optString("name", "")
-                if (name.endsWith(".apk", ignoreCase = true)) {
-                    apkUrl = asset.optString("browser_download_url")
-                    apkSize = asset.optLong("size", 0L)
-                    break
-                }
-            }
-
-            if (apkUrl.isNullOrBlank()) return@runCatching null
-
-            val releaseNotes = json.optString("body", "").trim()
+            val apkAsset = release.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
+                ?: return@runCatching null
+            if (apkAsset.downloadUrl.isBlank()) return@runCatching null
 
             AppUpdate(
                 versionName = cleanTag,
                 versionCode = latestVersionCode,
-                releaseNotes = releaseNotes,
-                apkUrl = apkUrl,
-                apkSize = apkSize
+                releaseNotes = release.body.trim(),
+                apkUrl = apkAsset.downloadUrl,
+                apkSize = apkAsset.size
             )
         }
     }

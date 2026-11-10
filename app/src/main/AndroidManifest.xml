@@ -43,6 +43,7 @@
     </queries>
 
     <application
+        android:name=".AbyssApplication"
         android:allowBackup="true"
         android:banner="@drawable/tv_banner"
         android:icon="@mipmap/ic_launcher"

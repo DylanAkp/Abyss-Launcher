@@ -159,7 +159,7 @@ fun MainScreen(
                 viewModel.playNextEpisodeInPlayer(nextEp)
             },
             onLaunchExternalFallback = { streamUrl, title ->
-                val tempItem = activeSession.mediaItem.copy(streamUrl = streamUrl, title = title, localizedTitle = title)
+                val tempItem = activeSession.mediaItem.copy(streamUrl = streamUrl, title = title)
                 SystemAppHelper.playMediaExternal(context, tempItem, PlayerPreference.EXTERNAL_PLAYER)
             }
         )

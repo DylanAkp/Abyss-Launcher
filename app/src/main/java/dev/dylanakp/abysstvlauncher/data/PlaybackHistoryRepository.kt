@@ -1,83 +1,100 @@
 package dev.dylanakp.abysstvlauncher.data
 
 import android.content.Context
+import dev.dylanakp.abysstvlauncher.data.local.AbyssDatabase
+import dev.dylanakp.abysstvlauncher.data.local.PlaybackHistoryEntity
 import dev.dylanakp.abysstvlauncher.model.PlaybackHistoryEntry
 import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import dev.dylanakp.abysstvlauncher.domain.repository.PlaybackHistoryRepository as IPlaybackHistoryRepository
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
-object PlaybackHistoryRepository {
+object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
 
-    private const val HISTORY_FILE = "playback_history.json"
+    private const val LEGACY_HISTORY_FILE = "playback_history.json"
+    private val database: AbyssDatabase by inject()
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val cache = ConcurrentHashMap<String, PlaybackHistoryEntry>()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var isLoaded = false
 
     @Synchronized
-    fun ensureLoaded(context: Context) {
+    override fun ensureLoaded(context: Context?) {
         if (isLoaded) return
         isLoaded = true
-        try {
-            val file = File(context.filesDir, HISTORY_FILE)
-            if (!file.exists()) return
-            val raw = file.readText()
-            if (raw.isBlank()) return
-            val arr = JSONArray(raw)
-            for (i in 0 until arr.length()) {
-                val obj = arr.optJSONObject(i) ?: continue
-                val id = obj.optString("itemId", "")
-                if (id.isBlank()) continue
-                val entry = PlaybackHistoryEntry(
-                    itemId = id,
-                    seriesId = obj.optString("seriesId", ""),
-                    seasonNumber = obj.optInt("seasonNumber", 0),
-                    episodeNumber = obj.optInt("episodeNumber", 0),
-                    episodeTitle = obj.optString("episodeTitle", ""),
-                    streamUrl = obj.optString("streamUrl", ""),
-                    positionMs = obj.optLong("positionMs", 0L),
-                    durationMs = obj.optLong("durationMs", 0L),
-                    lastPlayedTimestamp = obj.optLong("lastPlayedTimestamp", 0L),
-                    title = obj.optString("title", ""),
-                    posterUrl = obj.optString("posterUrl", ""),
-                    backdropUrl = obj.optString("backdropUrl", ""),
-                    category = obj.optString("category", "")
-                )
-                cache[id] = entry
+        context?.let { migrateLegacyFileIfPresent(it) }
+
+        runBlocking(Dispatchers.IO) {
+            val dao = database.playbackHistoryDao()
+            val entities = dao.getAll()
+            entities.forEach { entity ->
+                val entry = entity.toDomain()
+                cache[entry.itemId] = entry
                 if (entry.seriesId.isNotBlank()) {
-                    val existingSeries = cache[entry.seriesId]
-                    if (existingSeries == null || entry.lastPlayedTimestamp >= existingSeries.lastPlayedTimestamp) {
+                    val existing = cache[entry.seriesId]
+                    if (existing == null || entry.lastPlayedTimestamp >= existing.lastPlayedTimestamp) {
                         cache[entry.seriesId] = entry.copy(itemId = entry.seriesId)
                     }
                 }
             }
-        } catch (_: Exception) {}
+        }
     }
 
-    fun getEntry(context: Context, itemId: String): PlaybackHistoryEntry? {
+    private fun migrateLegacyFileIfPresent(context: Context) {
+        val file = File(context.filesDir, LEGACY_HISTORY_FILE)
+        if (!file.exists()) return
+
+        runCatching {
+            val raw = file.readText()
+            if (raw.isNotBlank()) {
+                val entries = json.decodeFromString<List<PlaybackHistoryEntry>>(raw)
+                val entities = entries.map { PlaybackHistoryEntity.fromDomain(it) }
+                if (entities.isNotEmpty()) {
+                    runBlocking(Dispatchers.IO) {
+                        AbyssDatabase.getInstance(context).playbackHistoryDao().upsertAll(entities)
+                    }
+                }
+            }
+            file.delete()
+        }
+    }
+
+    override fun getProgressPercent(itemId: String): Float = cache[itemId]?.progressPercent ?: 0f
+    override fun getSavedPositionMs(itemId: String): Long = cache[itemId]?.positionMs ?: 0L
+    override fun getSavedDurationMs(itemId: String): Long = cache[itemId]?.durationMs ?: 0L
+
+    override fun getEntry(context: Context, itemId: String): PlaybackHistoryEntry? {
         ensureLoaded(context)
         return cache[itemId]
     }
 
-    fun getAllEntries(context: Context): Map<String, PlaybackHistoryEntry> {
+    override fun getAllEntries(context: Context): Map<String, PlaybackHistoryEntry> {
         ensureLoaded(context)
         return cache.toMap()
     }
 
-    fun saveProgress(
+    override fun saveProgress(
         context: Context,
         itemId: String,
         positionMs: Long,
         durationMs: Long,
-        seriesId: String = "",
-        seasonNumber: Int = 0,
-        episodeNumber: Int = 0,
-        episodeTitle: String = "",
-        streamUrl: String = "",
-        title: String = "",
-        posterUrl: String = "",
-        backdropUrl: String = "",
-        category: String = ""
+        seriesId: String,
+        seasonNumber: Int,
+        episodeNumber: Int,
+        episodeTitle: String,
+        streamUrl: String,
+        title: String,
+        posterUrl: String,
+        backdropUrl: String,
+        category: String
     ) {
         if (durationMs <= 0L && positionMs <= 0L) return
         ensureLoaded(context)
@@ -107,16 +124,25 @@ object PlaybackHistoryRepository {
             category = resolvedCategory
         )
         cache[itemId] = entry
+
+        val toPersist = mutableListOf(PlaybackHistoryEntity.fromDomain(entry))
         if (seriesId.isNotBlank()) {
-            cache[seriesId] = entry.copy(itemId = seriesId)
+            val seriesEntry = entry.copy(itemId = seriesId)
+            cache[seriesId] = seriesEntry
+            toPersist.add(PlaybackHistoryEntity.fromDomain(seriesEntry))
         }
-        persistToDisk(context)
+
+        scope.launch {
+            AbyssDatabase.getInstance(context).playbackHistoryDao().upsertAll(toPersist)
+        }
     }
 
-    fun clearEntry(context: Context, itemId: String) {
+    override fun clearEntry(context: Context, itemId: String) {
         ensureLoaded(context)
         cache.remove(itemId)
-        persistToDisk(context)
+        scope.launch {
+            AbyssDatabase.getInstance(context).playbackHistoryDao().delete(itemId)
+        }
     }
 
     fun markEpisodesUpToWatched(
@@ -140,6 +166,8 @@ object PlaybackHistoryRepository {
         val resolvedBackdrop = backdropUrl.ifBlank { existingSeries?.backdropUrl.orEmpty() }
         val resolvedCategory = category.ifBlank { existingSeries?.category.orEmpty() }.ifBlank { "SERIES" }
 
+        val toPersist = mutableListOf<PlaybackHistoryEntity>()
+
         for (i in 0..targetIdx) {
             val ep = allEpisodes[i]
             val duration = if (ep.savedDurationMs > 0L) ep.savedDurationMs else 1_800_000L
@@ -159,20 +187,20 @@ object PlaybackHistoryRepository {
                 category = resolvedCategory
             )
             cache[ep.id] = entry
+            toPersist.add(PlaybackHistoryEntity.fromDomain(entry))
         }
 
-        // Set series resume entry to next episode so "Continue / Reprendre" immediately points to it
         val nextEp = if (targetIdx + 1 < allEpisodes.size) allEpisodes[targetIdx + 1] else null
-        if (nextEp != null) {
+        val seriesEntry = if (nextEp != null) {
             val nextDuration = if (nextEp.savedDurationMs > 0L) nextEp.savedDurationMs else 1_800_000L
-            cache[seriesId] = PlaybackHistoryEntry(
+            PlaybackHistoryEntry(
                 itemId = seriesId,
                 seriesId = seriesId,
                 seasonNumber = nextEp.seasonNumber,
                 episodeNumber = nextEp.episodeNumber,
                 episodeTitle = nextEp.title,
                 streamUrl = nextEp.streamUrl,
-                positionMs = 1L, // 0.001% -> included in continueWatching (< 0.96f && > 0)
+                positionMs = 1L,
                 durationMs = nextDuration,
                 lastPlayedTimestamp = now + targetIdx + 1,
                 title = resolvedTitle,
@@ -181,16 +209,15 @@ object PlaybackHistoryRepository {
                 category = resolvedCategory
             )
         } else {
-            // Entire series finished!
             val targetDuration = if (targetEpisode.savedDurationMs > 0L) targetEpisode.savedDurationMs else 1_800_000L
-            cache[seriesId] = PlaybackHistoryEntry(
+            PlaybackHistoryEntry(
                 itemId = seriesId,
                 seriesId = seriesId,
                 seasonNumber = targetEpisode.seasonNumber,
                 episodeNumber = targetEpisode.episodeNumber,
                 episodeTitle = targetEpisode.title,
                 streamUrl = targetEpisode.streamUrl,
-                positionMs = targetDuration, // 100% finished
+                positionMs = targetDuration,
                 durationMs = targetDuration,
                 lastPlayedTimestamp = now + targetIdx + 1,
                 title = resolvedTitle,
@@ -199,7 +226,12 @@ object PlaybackHistoryRepository {
                 category = resolvedCategory
             )
         }
-        persistToDisk(context)
+        cache[seriesId] = seriesEntry
+        toPersist.add(PlaybackHistoryEntity.fromDomain(seriesEntry))
+
+        scope.launch {
+            AbyssDatabase.getInstance(context).playbackHistoryDao().upsertAll(toPersist)
+        }
     }
 
     fun markSingleEpisodeWatched(
@@ -239,15 +271,17 @@ object PlaybackHistoryRepository {
         )
         cache[targetEpisode.id] = entry
 
+        val toPersist = mutableListOf(PlaybackHistoryEntity.fromDomain(entry))
+
         val targetIdx = allEpisodes.indexOfFirst { it.id == targetEpisode.id }
         val nextEp = if (targetIdx != -1) {
             allEpisodes.drop(targetIdx + 1).firstOrNull { (cache[it.id]?.progressPercent ?: 0f) < 0.95f }
                 ?: allEpisodes.firstOrNull { (cache[it.id]?.progressPercent ?: 0f) < 0.95f }
         } else null
 
-        if (nextEp != null) {
+        val seriesEntry = if (nextEp != null) {
             val nextDuration = if (nextEp.savedDurationMs > 0L) nextEp.savedDurationMs else 1_800_000L
-            cache[seriesId] = PlaybackHistoryEntry(
+            PlaybackHistoryEntry(
                 itemId = seriesId,
                 seriesId = seriesId,
                 seasonNumber = nextEp.seasonNumber,
@@ -263,7 +297,7 @@ object PlaybackHistoryRepository {
                 category = resolvedCategory
             )
         } else {
-            cache[seriesId] = PlaybackHistoryEntry(
+            PlaybackHistoryEntry(
                 itemId = seriesId,
                 seriesId = seriesId,
                 seasonNumber = targetEpisode.seasonNumber,
@@ -279,7 +313,12 @@ object PlaybackHistoryRepository {
                 category = resolvedCategory
             )
         }
-        persistToDisk(context)
+        cache[seriesId] = seriesEntry
+        toPersist.add(PlaybackHistoryEntity.fromDomain(seriesEntry))
+
+        scope.launch {
+            AbyssDatabase.getInstance(context).playbackHistoryDao().upsertAll(toPersist)
+        }
     }
 
     fun unmarkEpisodeWatched(
@@ -301,9 +340,8 @@ object PlaybackHistoryRepository {
         val resolvedBackdrop = backdropUrl.ifBlank { existingSeries?.backdropUrl.orEmpty() }
         val resolvedCategory = category.ifBlank { existingSeries?.category.orEmpty() }.ifBlank { "SERIES" }
 
-        // Point series resume back to this episode
         val epDuration = if (episode.savedDurationMs > 0L) episode.savedDurationMs else 1_800_000L
-        cache[seriesId] = PlaybackHistoryEntry(
+        val seriesEntry = PlaybackHistoryEntry(
             itemId = seriesId,
             seriesId = seriesId,
             seasonNumber = episode.seasonNumber,
@@ -318,32 +356,12 @@ object PlaybackHistoryRepository {
             backdropUrl = resolvedBackdrop,
             category = resolvedCategory
         )
-        persistToDisk(context)
-    }
+        cache[seriesId] = seriesEntry
 
-    @Synchronized
-    private fun persistToDisk(context: Context) {
-        try {
-            val arr = JSONArray()
-            cache.values.forEach { entry ->
-                val obj = JSONObject()
-                obj.put("itemId", entry.itemId)
-                obj.put("seriesId", entry.seriesId)
-                obj.put("seasonNumber", entry.seasonNumber)
-                obj.put("episodeNumber", entry.episodeNumber)
-                obj.put("episodeTitle", entry.episodeTitle)
-                obj.put("streamUrl", entry.streamUrl)
-                obj.put("positionMs", entry.positionMs)
-                obj.put("durationMs", entry.durationMs)
-                obj.put("lastPlayedTimestamp", entry.lastPlayedTimestamp)
-                obj.put("title", entry.title)
-                obj.put("posterUrl", entry.posterUrl)
-                obj.put("backdropUrl", entry.backdropUrl)
-                obj.put("category", entry.category)
-                arr.put(obj)
-            }
-            val file = File(context.filesDir, HISTORY_FILE)
-            file.writeText(arr.toString())
-        } catch (_: Exception) {}
+        scope.launch {
+            val dao = AbyssDatabase.getInstance(context).playbackHistoryDao()
+            dao.delete(episode.id)
+            dao.upsert(PlaybackHistoryEntity.fromDomain(seriesEntry))
+        }
     }
 }

@@ -141,13 +141,14 @@ fun MediaDetailModal(
                                 }
 
                                 if (isSeerConfigured && item.seerStatus != SeerMediaStatus.UNKNOWN) {
-                                    val (statusBg, statusFg) = when (item.seerStatus) {
-                                        SeerMediaStatus.AVAILABLE -> Pair(Color(0x3310B981), Color(0xFF6EE7B7))
-                                        SeerMediaStatus.PROCESSING -> Pair(Color(0x3306B6D4), Color(0xFF67E8F9))
-                                        SeerMediaStatus.PENDING_APPROVAL -> Pair(Color(0x33F59E0B), Color(0xFFFCD34D))
-                                        else -> Pair(Color(0x22FFFFFF), AbyssTextSecondary)
+                                    val (statusBg, statusFg, statusTextRes) = when (item.seerStatus) {
+                                        SeerMediaStatus.AVAILABLE -> Triple(Color(0x3310B981), Color(0xFF6EE7B7), R.string.details_status_available)
+                                        SeerMediaStatus.PROCESSING -> Triple(Color(0x3306B6D4), Color(0xFF67E8F9), R.string.details_status_processing)
+                                        SeerMediaStatus.PENDING_APPROVAL -> Triple(Color(0x33F59E0B), Color(0xFFFCD34D), R.string.details_status_pending)
+                                        SeerMediaStatus.PARTIALLY_AVAILABLE -> Triple(Color(0x333B82F6), Color(0xFF93C5FD), R.string.details_status_partially_available)
+                                        SeerMediaStatus.UNKNOWN -> Triple(Color(0x22FFFFFF), AbyssTextSecondary, R.string.details_status_not_requested)
                                     }
-                                    val statusText = item.seerStatus.label()
+                                    val statusText = stringResource(statusTextRes)
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(4.dp))
