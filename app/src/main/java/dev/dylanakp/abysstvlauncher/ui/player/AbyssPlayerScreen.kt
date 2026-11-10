@@ -45,6 +45,10 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.dylanakp.abysstvlauncher.player.PlayerManager
+import dev.dylanakp.abysstvlauncher.player.TrackOption
+import org.koin.compose.koinInject
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -109,15 +113,6 @@ data class PlayerSession(
     val nextEpisode: SeriesEpisode? = null
 )
 
-private data class TrackOption(
-    val label: String,
-    val subLabel: String,
-    val group: Tracks.Group?,
-    val trackIndex: Int,
-    val isSelected: Boolean,
-    val isOffOption: Boolean = false
-)
-
 private enum class PlayerModalType {
     NONE,
     AUDIO_TRACKS,
@@ -131,19 +126,24 @@ fun AbyssPlayerScreen(
     onBack: (positionMs: Long, durationMs: Long) -> Unit,
     onProgressUpdate: (positionMs: Long, durationMs: Long) -> Unit,
     onPlayNextEpisode: (SeriesEpisode?) -> Unit,
-    onLaunchExternalFallback: (String, String) -> Unit
+    onLaunchExternalFallback: (String, String) -> Unit,
+    playerManager: PlayerManager = koinInject()
 ) {
     val context = LocalContext.current
+    val playerState by playerManager.state.collectAsStateWithLifecycle()
+    val exoPlayer = playerManager.player
 
-    var isPlaying by remember { mutableStateOf(true) }
-    var isBuffering by remember { mutableStateOf(true) }
-    var playerError by remember { mutableStateOf<String?>(null) }
+    val isPlaying = playerState.isPlaying
+    val isBuffering = playerState.isBuffering
+    val playerError = playerState.error
+    val currentPositionMs = playerState.currentPositionMs
+    val durationMs = playerState.durationMs
+    val bufferedPositionMs = playerState.bufferedPositionMs
+    val audioTracks = playerState.audioTracks
+    val subtitleTracks = playerState.subtitleTracks
+    val videoResolutionBadge = playerState.videoResolutionBadge
 
-    var currentPositionMs by remember { mutableLongStateOf(0L) }
-    var durationMs by remember { mutableLongStateOf(0L) }
-    var bufferedPositionMs by remember { mutableLongStateOf(0L) }
     var currentWallClockMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
-
     var showOsd by remember { mutableStateOf(true) }
     var lastInteractionTick by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var activeModal by remember { mutableStateOf(PlayerModalType.NONE) }
@@ -158,212 +158,52 @@ fun AbyssPlayerScreen(
         mutableStateOf(session.savedResumePositionMs > 15_000L && session.startPositionMs == 0L)
     }
 
-    var audioTracks by remember { mutableStateOf<List<TrackOption>>(emptyList()) }
-    var subtitleTracks by remember { mutableStateOf<List<TrackOption>>(emptyList()) }
-    var videoResolutionBadge by remember { mutableStateOf("") }
-
     val rootFocusRequester = remember { FocusRequester() }
     val playPauseFocusRequester = remember { FocusRequester() }
     val resumeButtonFocusRequester = remember { FocusRequester() }
     val retryButtonFocusRequester = remember { FocusRequester() }
 
-    val exoPlayer = remember {
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("AbyssTVLauncher/1.0.0 (Android TV; Jellyfin)")
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(12_000)
-            .setReadTimeoutMs(20_000)
-
-        val renderersFactory = DefaultRenderersFactory(context)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-            .setEnableDecoderFallback(true)
-
-        val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                15_000,
-                50_000,
-                2_000,
-                4_000
-            )
-            .build()
-
-        val audioAttributes = AudioAttributes.Builder()
-            .setUsage(C.USAGE_MEDIA)
-            .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
-            .build()
-
-        ExoPlayer.Builder(context, renderersFactory)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(httpDataSourceFactory))
-            .setLoadControl(loadControl)
-            .setAudioAttributes(audioAttributes, true)
-            .setHandleAudioBecomingNoisy(true)
-            .build()
-            .apply {
-                // Default: Subtitles OFF unless explicitly enabled by user in OSD
-                trackSelectionParameters = trackSelectionParameters
-                    .buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                    .build()
-                playWhenReady = true
-            }
-    }
-
-    fun refreshTracks(tracks: Tracks) {
-        val audioList = mutableListOf<TrackOption>()
-        val textList = mutableListOf<TrackOption>()
-
-        val isTextDisabled = exoPlayer.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
-        val anyTextSelected = !isTextDisabled && tracks.groups.any { it.type == C.TRACK_TYPE_TEXT && it.isSelected }
-        textList.add(
-            TrackOption(
-                label = context.getString(R.string.subtitles_off),
-                subLabel = "",
-                group = null,
-                trackIndex = -1,
-                isSelected = !anyTextSelected,
-                isOffOption = true
-            )
-        )
-
-        for (group in tracks.groups) {
-            when (group.type) {
-                C.TRACK_TYPE_VIDEO -> {
-                    for (i in 0 until group.length) {
-                        if (group.isTrackSelected(i)) {
-                            val fmt = group.getTrackFormat(i)
-                            if (fmt.height > 0) {
-                                videoResolutionBadge = when {
-                                    fmt.height >= 2160 || fmt.width >= 3840 -> "4K UHD"
-                                    fmt.height >= 1080 -> "1080p FHD"
-                                    fmt.height >= 720 -> "720p HD"
-                                    else -> "${fmt.height}p"
-                                }
-                            }
-                        }
-                    }
-                }
-                C.TRACK_TYPE_AUDIO -> {
-                    for (i in 0 until group.length) {
-                        val fmt = group.getTrackFormat(i)
-                        val selected = group.isTrackSelected(i)
-                        val defaultAudio = context.getString(R.string.default_audio_track, i + 1)
-                        val langName = formatLanguage(fmt.language, fmt.label, i + 1, isAudio = true, defaultLabel = defaultAudio)
-                        val codec = formatCodec(fmt.sampleMimeType, fmt.codecs)
-                        val channels = formatChannels(fmt.channelCount)
-                        val meta = listOf(codec, channels).filter { it.isNotBlank() }.joinToString(" • ")
-                        audioList.add(
-                            TrackOption(
-                                label = langName,
-                                subLabel = meta,
-                                group = group,
-                                trackIndex = i,
-                                isSelected = selected
-                            )
-                        )
-                    }
-                }
-                C.TRACK_TYPE_TEXT -> {
-                    for (i in 0 until group.length) {
-                        val fmt = group.getTrackFormat(i)
-                        val selected = !isTextDisabled && group.isTrackSelected(i)
-                        val defaultSub = context.getString(R.string.default_subtitle_track, i + 1)
-                        val langName = formatLanguage(fmt.language, fmt.label, i + 1, isAudio = false, defaultLabel = defaultSub)
-                        val subType = formatSubtitleFormat(fmt.sampleMimeType, fmt.selectionFlags)
-                        textList.add(
-                            TrackOption(
-                                label = langName,
-                                subLabel = subType,
-                                group = group,
-                                trackIndex = i,
-                                isSelected = selected
-                            )
-                        )
-                    }
-                }
-            }
-        }
-        audioTracks = audioList
-        subtitleTracks = textList
-    }
-
-    // Load stream whenever session.streamUrl changes, with subtitles disabled by default
     LaunchedEffect(session.streamUrl) {
-        playerError = null
-        isBuffering = true
-        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-            .buildUpon()
-            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-            .build()
-        val item = ExoMediaItem.fromUri(session.streamUrl)
-        exoPlayer.setMediaItem(item)
-        if (session.startPositionMs > 0L) {
-            exoPlayer.seekTo(session.startPositionMs)
-        } else if (session.savedResumePositionMs > 15_000L) {
-            exoPlayer.seekTo(session.savedResumePositionMs)
-            currentPositionMs = session.savedResumePositionMs
-        }
-        exoPlayer.prepare()
-        exoPlayer.playWhenReady = true
+        playerManager.prepare(context, session)
         lastInteractionTick = System.currentTimeMillis()
         showOsd = true
     }
 
     var hasHandledCompletion by remember(session.streamUrl) { mutableStateOf(false) }
 
-    DisposableEffect(exoPlayer) {
-        val listener = object : Player.Listener {
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                isBuffering = playbackState == Player.STATE_BUFFERING
-                if (playbackState == Player.STATE_READY) {
-                    durationMs = exoPlayer.duration.coerceAtLeast(0L)
-                    currentPositionMs = exoPlayer.currentPosition.coerceAtLeast(0L)
-                } else if (playbackState == Player.STATE_ENDED && !hasHandledCompletion) {
-                    hasHandledCompletion = true
-                    val dur = exoPlayer.duration.coerceAtLeast(0L)
-                    if (dur > 0L) {
-                        onProgressUpdate(dur, dur)
-                    }
-                    onPlayNextEpisode(session.nextEpisode)
-                }
+    LaunchedEffect(playerState.isEnded) {
+        if (playerState.isEnded && !hasHandledCompletion) {
+            hasHandledCompletion = true
+            val dur = playerState.durationMs
+            if (dur > 0L) {
+                onProgressUpdate(dur, dur)
             }
-
-            override fun onIsPlayingChanged(playing: Boolean) {
-                isPlaying = playing
-            }
-
-            override fun onTracksChanged(tracks: Tracks) {
-                refreshTracks(tracks)
-            }
-
-            override fun onPlayerError(error: PlaybackException) {
-                playerError = "Playback error (${error.errorCodeName})"
-                showOsd = true
-            }
+            onPlayNextEpisode(session.nextEpisode)
         }
-        exoPlayer.addListener(listener)
+    }
+
+    DisposableEffect(session.streamUrl) {
         onDispose {
             val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
             val dur = exoPlayer.duration.coerceAtLeast(0L)
             if (dur > 0L) {
                 onProgressUpdate(pos, dur)
             }
-            exoPlayer.removeListener(listener)
-            exoPlayer.release()
+            playerManager.release()
         }
     }
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, exoPlayer) {
+    DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             when (event) {
                 androidx.lifecycle.Lifecycle.Event.ON_PAUSE,
                 androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
-                    exoPlayer.pause()
+                    playerManager.pause()
                 }
                 androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
                     if (isPlaying && !exoPlayer.isPlaying) {
-                        exoPlayer.play()
+                        playerManager.play()
                     }
                 }
                 else -> {}
@@ -375,21 +215,10 @@ fun AbyssPlayerScreen(
         }
     }
 
-    // Poll playback position & periodically save history every 5 seconds
-    LaunchedEffect(exoPlayer, session.streamUrl) {
-        var tickCount = 0
-        while (true) {
-            currentPositionMs = exoPlayer.currentPosition.coerceAtLeast(0L)
-            val dur = exoPlayer.duration
-            if (dur > 0L && dur != C.TIME_UNSET) {
-                durationMs = dur
-            }
-            bufferedPositionMs = exoPlayer.bufferedPosition.coerceAtLeast(0L)
-            tickCount++
-            if (durationMs > 0L && tickCount % 10 == 0) {
-                onProgressUpdate(currentPositionMs, durationMs)
-            }
-            delay(500L)
+    // Periodically report playback progress every 5 seconds
+    LaunchedEffect(currentPositionMs, durationMs) {
+        if (durationMs > 0L && currentPositionMs > 0L) {
+            onProgressUpdate(currentPositionMs, durationMs)
         }
     }
 
@@ -406,8 +235,7 @@ fun AbyssPlayerScreen(
         if (seekCommitTick > 0L && accumulatedSeekDeltaMs != 0L) {
             delay(420L)
             val target = seekPreviewTargetMs.coerceIn(0L, durationMs.coerceAtLeast(1L))
-            exoPlayer.seekTo(target)
-            currentPositionMs = target
+            playerManager.seekTo(target)
             accumulatedSeekDeltaMs = 0L
             seekPreviewTargetMs = -1L
         }
@@ -661,9 +489,7 @@ fun AbyssPlayerScreen(
                             isPrimary = true,
                             focusRequester = retryButtonFocusRequester,
                             onClick = {
-                                playerError = null
-                                exoPlayer.prepare()
-                                exoPlayer.play()
+                                playerManager.retry(context, session)
                             }
                         )
                         OsdPillButton(
@@ -849,8 +675,7 @@ fun AbyssPlayerScreen(
                                 label = stringResource(R.string.restart_from_beginning),
                                 icon = AbyssIconType.RESTART,
                                 onClick = {
-                                    exoPlayer.seekTo(0L)
-                                    currentPositionMs = 0L
+                                    playerManager.seekTo(0L)
                                     showResumePrompt = false
                                     lastInteractionTick = System.currentTimeMillis()
                                 }
@@ -1001,7 +826,6 @@ fun AbyssPlayerScreen(
                             label = activeAudioLabel?.ifBlank { audioTitle } ?: audioTitle,
                             icon = AbyssIconType.AUDIO_SPEAKER,
                             onClick = {
-                                refreshTracks(exoPlayer.currentTracks)
                                 activeModal = PlayerModalType.AUDIO_TRACKS
                                 lastInteractionTick = System.currentTimeMillis()
                             }
@@ -1014,7 +838,6 @@ fun AbyssPlayerScreen(
                             label = subLabel,
                             icon = AbyssIconType.SUBTITLES_CC,
                             onClick = {
-                                refreshTracks(exoPlayer.currentTracks)
                                 activeModal = PlayerModalType.SUBTITLE_TRACKS
                                 lastInteractionTick = System.currentTimeMillis()
                             }
@@ -1042,33 +865,12 @@ fun AbyssPlayerScreen(
                 audioTracks = audioTracks,
                 subtitleTracks = subtitleTracks,
                 onSelectAudio = { opt ->
-                    val group = opt.group
-                    if (group != null) {
-                        val override = TrackSelectionOverride(group.mediaTrackGroup, listOf(opt.trackIndex))
-                        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                            .buildUpon()
-                            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-                            .setOverrideForType(override)
-                            .build()
-                    }
+                    opt.group?.let { playerManager.selectAudioTrack(it, opt.trackIndex) }
                     activeModal = PlayerModalType.NONE
                     lastInteractionTick = System.currentTimeMillis()
                 },
                 onSelectSubtitle = { opt ->
-                    if (opt.isOffOption) {
-                        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                            .buildUpon()
-                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                            .build()
-                    } else if (opt.group != null) {
-                        val override = TrackSelectionOverride(opt.group.mediaTrackGroup, listOf(opt.trackIndex))
-                        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                            .buildUpon()
-                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                            .setOverrideForType(override)
-                            .build()
-                    }
+                    playerManager.selectSubtitleTrack(opt.group, opt.trackIndex, opt.isOffOption)
                     activeModal = PlayerModalType.NONE
                     lastInteractionTick = System.currentTimeMillis()
                 },
@@ -1343,68 +1145,4 @@ fun formatDurationMs(ms: Long): String {
     } else {
         String.format(Locale.ROOT, "%02d:%02d", minutes, seconds)
     }
-}
-
-private fun formatLanguage(
-    langCode: String?,
-    trackLabel: String?,
-    index: Int,
-    isAudio: Boolean,
-    defaultLabel: String
-): String {
-    val cleanLabel = trackLabel?.trim().orEmpty()
-    val code = langCode?.trim()?.lowercase(Locale.ROOT).orEmpty()
-    val langDisplay = if (code.isNotBlank() && code != "und") {
-        Locale.forLanguageTag(code).getDisplayLanguage(Locale.getDefault()).replaceFirstChar { it.uppercase() }
-    } else ""
-
-    return when {
-        langDisplay.isNotBlank() && cleanLabel.isNotBlank() && !cleanLabel.equals(langDisplay, ignoreCase = true) ->
-            "$langDisplay ($cleanLabel)"
-        langDisplay.isNotBlank() -> langDisplay
-        cleanLabel.isNotBlank() -> cleanLabel
-        else -> defaultLabel
-    }
-}
-
-private fun formatCodec(mimeType: String?, codecs: String?): String {
-    val m = mimeType?.lowercase(Locale.ROOT).orEmpty()
-    val c = codecs?.lowercase(Locale.ROOT).orEmpty()
-    return when {
-        m.contains("eac3") || c.contains("ec-3") -> "Dolby Digital+ (EAC3)"
-        m.contains("ac3") || c.contains("ac-3") -> "Dolby Digital (AC3)"
-        m.contains("dts") || c.contains("dts") -> "DTS"
-        m.contains("truehd") -> "Dolby TrueHD"
-        m.contains("flac") -> "FLAC"
-        m.contains("aac") || c.contains("mp4a") -> "AAC"
-        m.contains("opus") -> "Opus"
-        m.contains("vorbis") -> "Vorbis"
-        m.contains("mpeg") || m.contains("mp3") -> "MP3"
-        else -> ""
-    }
-}
-
-private fun formatChannels(channelCount: Int): String {
-    return when (channelCount) {
-        8 -> "7.1"
-        6 -> "5.1"
-        2 -> "2.0 Stéréo"
-        1 -> "1.0 Mono"
-        else -> if (channelCount > 0) "${channelCount}ch" else ""
-    }
-}
-
-private fun formatSubtitleFormat(mimeType: String?, selectionFlags: Int): String {
-    val m = mimeType?.lowercase(Locale.ROOT).orEmpty()
-    val fmt = when {
-        m.contains("subrip") || m.contains("srt") -> "SRT"
-        m.contains("ssa") || m.contains("ass") -> "ASS/SSA"
-        m.contains("vtt") -> "WebVTT"
-        m.contains("pgs") -> "PGS"
-        m.contains("dvbsubs") -> "DVB"
-        m.contains("ttml") -> "TTML"
-        else -> ""
-    }
-    val forced = if ((selectionFlags and C.SELECTION_FLAG_FORCED) != 0) "Forcé" else ""
-    return listOf(fmt, forced).filter { it.isNotBlank() }.joinToString(" • ")
 }
