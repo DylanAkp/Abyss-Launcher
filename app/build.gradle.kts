@@ -41,11 +41,24 @@ android {
         buildConfigField("String", "TMDB_API_KEY", "\"${escapeString(envProps["TMDB_API_KEY"] ?: "")}\"")
     }
 
+    signingConfigs {
+        create("release") {
+            val ksFile = rootProject.file("release.jks")
+            if (ksFile.exists()) {
+                storeFile = ksFile
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("KEY_ALIAS") ?: ""
+                keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            val ksFile = rootProject.file("release.jks")
+            signingConfig = if (ksFile.exists()) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

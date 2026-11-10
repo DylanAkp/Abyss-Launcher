@@ -74,7 +74,7 @@ fun AppUpdateModal(
 
         val primaryButtonRequester = remember { FocusRequester() }
 
-        LaunchedEffect(update) {
+        LaunchedEffect(update, isDownloading, errorMessage) {
             delay(120)
             try {
                 primaryButtonRequester.requestFocus()

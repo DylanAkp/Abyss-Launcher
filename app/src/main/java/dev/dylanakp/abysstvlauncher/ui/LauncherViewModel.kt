@@ -1598,7 +1598,10 @@ class LauncherViewModel : ViewModel() {
             }.onSuccess { apkFile ->
                 Log.d("AbyssUpdate", "Download successful: ${apkFile.absolutePath} (${apkFile.length()} bytes)")
                 _uiState.update { it.copy(isDownloadingUpdate = false) }
-                AppUpdateRepository.triggerInstall(context, apkFile).onFailure { error ->
+                AppUpdateRepository.triggerInstall(context, apkFile).onSuccess {
+                    // Close update modal once package installer is active
+                    dismissUpdate()
+                }.onFailure { error ->
                     Log.e("AbyssUpdate", "Install trigger failed", error)
                     _uiState.update {
                         it.copy(updateError = error.localizedMessage ?: "Installation failed")

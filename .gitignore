@@ -16,3 +16,6 @@
 .env.*
 remote.py
 __pycache__/
+*.jks
+*.keystore
+release.keystore.base64
