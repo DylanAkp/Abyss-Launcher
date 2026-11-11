@@ -25,30 +25,19 @@
 
 # 🚀 Getting Started
 
-## Step 1: Prerequisites
+## Step 1: Download APK
 
-- Android SDK 35 (Android 15) with Build Tools 35.0.0
-- Java 17+ & Gradle 8.11+
-- Android TV / Google TV device running Android 9.0+ (API 28+) connected via ADB
+Download the latest `Abyss-Launcher-*.apk` from [GitHub Releases](https://github.com/DylanAkp/Abyss-Launcher/releases/latest).
 
-## Step 2: Build and Install
+*(Optional: to build from source, clone the repository and run `./gradlew assembleRelease`)*
 
-1. Clone repository:
-   ```bash
-   git clone https://github.com/DylanAkp/Abyss-Launcher.git
-   cd Abyss-Launcher
-   ```
+## Step 2: Sideload via ADB
 
-2. Compile release APK (recommended for maximum 60fps performance):
-   ```bash
-   ./gradlew assembleRelease
-   ```
-
-3. Sideload onto Android TV device over ADB:
-   ```bash
-   adb connect <TV_IP_ADDRESS>:5555
-   adb install -r app/build/outputs/apk/release/app-release.apk
-   ```
+Sideload onto your Android TV device:
+```bash
+adb connect <TV_IP_ADDRESS>:5555
+adb install -r Abyss-Launcher-*.apk
+```
 
 ## Step 3: Set as Default Launcher (Disable Stock Launcher)
 
