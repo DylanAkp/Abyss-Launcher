@@ -905,6 +905,10 @@ fun MainScreen(
                 .padding(bottom = 20.dp)
         ) {
             state.statusBannerMessage?.let { msg ->
+                val bannerText = when (msg) {
+                    is dev.dylanakp.abysstvlauncher.ui.UiMessage.Resource -> androidx.compose.ui.res.stringResource(msg.resId, *msg.args.toTypedArray())
+                    is dev.dylanakp.abysstvlauncher.ui.UiMessage.Text -> msg.text
+                }
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
@@ -913,7 +917,7 @@ fun MainScreen(
                         .padding(horizontal = 20.dp, vertical = 9.dp)
                 ) {
                     Text(
-                        text = msg,
+                        text = bannerText,
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = AbyssTextPrimary
                     )

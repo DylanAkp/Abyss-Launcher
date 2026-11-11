@@ -108,7 +108,7 @@ data class LauncherUiState(
     val searchResults: List<MediaItem> = emptyList(),
     val isSearching: Boolean = false,
     val searchHistory: List<String> = emptyList(),
-    val statusBannerMessage: String? = null,
+    val statusBannerMessage: UiMessage? = null,
     val activeCatalogSelection: dev.dylanakp.abysstvlauncher.ui.components.CatalogSelection? = null,
     val pendingUpdate: AppUpdate? = null,
     val isCheckingUpdates: Boolean = false,
@@ -145,9 +145,6 @@ class LauncherViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(LauncherUiState())
     val uiState: StateFlow<LauncherUiState> = _uiState.asStateFlow()
 
-    private fun getString(@StringRes resId: Int, vararg args: Any): String {
-        return appContext?.getString(resId, *args).orEmpty()
-    }
 
     fun initialize(context: Context) {
         if (isInitialized) return
@@ -579,7 +576,7 @@ class LauncherViewModel : ViewModel() {
                 }
             }
             if (!launched) {
-                showStatusMessage(getString(R.string.toast_trailer_unavailable), 2500L)
+                showStatusMessage(R.string.toast_trailer_unavailable, durationMs = 2500L)
             }
         }
     }
@@ -704,7 +701,7 @@ class LauncherViewModel : ViewModel() {
 
             if (targetNext == null) {
                 withContext(Dispatchers.Main) {
-                    showStatusMessage(getString(R.string.msg_series_complete), 3000L)
+                    showStatusMessage(R.string.msg_series_complete, durationMs = 3000L)
                 }
                 return@launch
             }
@@ -718,7 +715,7 @@ class LauncherViewModel : ViewModel() {
 
             withContext(Dispatchers.Main) {
                 val nextCode = "S${targetNext.seasonNumber.toString().padStart(2, '0')}E${targetNext.episodeNumber.toString().padStart(2, '0')}"
-                showStatusMessage(getString(R.string.msg_playing_next, nextCode), 2500L)
+                showStatusMessage(R.string.msg_playing_next, nextCode, durationMs = 2500L)
                 playSeriesEpisode(resolvedSeriesItem, targetNext, followingEp, 0L)
             }
         }
@@ -966,14 +963,14 @@ class LauncherViewModel : ViewModel() {
                 }
                 if (showToast) {
                     withContext(Dispatchers.Main) {
-                        showStatusMessage(getString(R.string.msg_sync_success), 3500L)
+                        showStatusMessage(R.string.msg_sync_success, durationMs = 3500L)
                     }
                 }
             } else {
                 withContext(Dispatchers.Main) {
                     _uiState.update { it.copy(isSyncingJellyfin = false) }
                     if (showToast) {
-                        showStatusMessage(getString(R.string.msg_sync_error), 3500L)
+                        showStatusMessage(R.string.msg_sync_error, durationMs = 3500L)
                     }
                 }
             }
@@ -995,10 +992,10 @@ class LauncherViewModel : ViewModel() {
                 _uiState.update { it.copy(isTestingSeer = false) }
                 if (testRes.isSuccess) {
                     val ver = testRes.getOrThrow()
-                    showStatusMessage(getString(R.string.msg_seer_connected, ver), 3000L)
+                    showStatusMessage(R.string.msg_seer_connected, ver, durationMs = 3000L)
                     syncSeerData(updated)
                 } else {
-                    showStatusMessage(getString(R.string.msg_seer_failed), 3500L)
+                    showStatusMessage(R.string.msg_seer_failed, durationMs = 3500L)
                 }
             }
         }
@@ -1206,12 +1203,16 @@ class LauncherViewModel : ViewModel() {
             val res = SeerRepository.requestMedia(config, tmdbId, isTv)
             withContext(Dispatchers.Main) {
                 if (res.isSuccess) {
-                    showStatusMessage(getString(R.string.msg_seer_request_success), 3500L)
+                    showStatusMessage(R.string.msg_seer_request_success, durationMs = 3500L)
                     closeMediaDetails()
                     syncSeerData(config)
                 } else {
-                    val err = res.exceptionOrNull()?.message ?: getString(R.string.msg_seer_request_error)
-                    showStatusMessage(err, 4000L)
+                    val errMsg = res.exceptionOrNull()?.message
+                    if (errMsg != null) {
+                        showStatusMessage(errMsg, 4000L)
+                    } else {
+                        showStatusMessage(R.string.msg_seer_request_error, durationMs = 4000L)
+                    }
                 }
             }
         }
@@ -1234,7 +1235,7 @@ class LauncherViewModel : ViewModel() {
                 )
                 _uiState.value = derived
             }
-            showStatusMessage(getString(R.string.msg_removed_continue), 2500L)
+            showStatusMessage(R.string.msg_removed_continue, durationMs = 2500L)
         }
     }
 
@@ -1248,7 +1249,7 @@ class LauncherViewModel : ViewModel() {
             if (isWatched) {
                 PlaybackHistoryRepository.clearEntry(ctx, item.id)
                 JellyfinRepository.markUnwatched(jfConfig, item.jellyfinId.ifBlank { item.id })
-                showStatusMessage(getString(R.string.msg_marked_single_unwatched), 2500L)
+                showStatusMessage(R.string.msg_marked_single_unwatched, durationMs = 2500L)
             } else {
                 PlaybackHistoryRepository.saveProgress(
                     context = ctx,
@@ -1262,7 +1263,7 @@ class LauncherViewModel : ViewModel() {
                     category = item.category.name
                 )
                 JellyfinRepository.markWatched(jfConfig, item.jellyfinId.ifBlank { item.id })
-                showStatusMessage(getString(R.string.msg_marked_single_watched), 2500L)
+                showStatusMessage(R.string.msg_marked_single_watched, durationMs = 2500L)
             }
 
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
@@ -1289,7 +1290,7 @@ class LauncherViewModel : ViewModel() {
         }
         prefs?.watchlistIds = currentIds
         _uiState.update { it.copy(watchlistIds = currentIds) }
-        showStatusMessage(getString(if (isAdded) R.string.msg_added_watchlist else R.string.msg_removed_watchlist), 2000L)
+        showStatusMessage(if (isAdded) R.string.msg_added_watchlist else R.string.msg_removed_watchlist, durationMs = 2000L)
     }
 
     fun updateHeroIndex(newIndex: Int) {
@@ -1341,7 +1342,7 @@ class LauncherViewModel : ViewModel() {
                 _uiState.value = derived
             }
 
-            showStatusMessage(getString(R.string.msg_all_prev_watched), 2500L)
+            showStatusMessage(R.string.msg_all_prev_watched, durationMs = 2500L)
         }
     }
 
@@ -1392,7 +1393,7 @@ class LauncherViewModel : ViewModel() {
             }
             val epCode = "S${targetEpisode.seasonNumber.toString().padStart(2, '0')}E${targetEpisode.episodeNumber.toString().padStart(2, '0')}"
             val resId = if (isCurrentlyWatched) R.string.msg_marked_unwatched else R.string.msg_marked_watched
-            showStatusMessage(getString(resId, epCode), 2500L)
+            showStatusMessage(resId, epCode, durationMs = 2500L)
         }
     }
 
@@ -1475,7 +1476,7 @@ class LauncherViewModel : ViewModel() {
             currentPinned.add(packageName)
             prefs?.pinnedPackages = currentPinned
             refreshAppsList()
-            showStatusMessage(getString(R.string.msg_app_pinned), 2000L)
+            showStatusMessage(R.string.msg_app_pinned, durationMs = 2000L)
         }
     }
 
@@ -1484,7 +1485,7 @@ class LauncherViewModel : ViewModel() {
         if (currentPinned.remove(packageName)) {
             prefs?.pinnedPackages = currentPinned
             refreshAppsList()
-            showStatusMessage(getString(R.string.msg_app_unpinned), 2000L)
+            showStatusMessage(R.string.msg_app_unpinned, durationMs = 2000L)
         }
     }
 
@@ -1493,7 +1494,7 @@ class LauncherViewModel : ViewModel() {
         currentHidden.add(packageName)
         prefs?.hiddenPackages = currentHidden
         refreshAppsList()
-        showStatusMessage(getString(R.string.msg_app_hidden), 2000L)
+        showStatusMessage(R.string.msg_app_hidden, durationMs = 2000L)
     }
 
     fun unhideApp(packageName: String) {
@@ -1501,7 +1502,7 @@ class LauncherViewModel : ViewModel() {
         if (currentHidden.remove(packageName)) {
             prefs?.hiddenPackages = currentHidden
             refreshAppsList()
-            showStatusMessage(getString(R.string.msg_app_unhidden), 2000L)
+            showStatusMessage(R.string.msg_app_unhidden, durationMs = 2000L)
         }
     }
 
@@ -1637,17 +1638,20 @@ class LauncherViewModel : ViewModel() {
         _uiState.update { it.copy(searchHistory = current) }
     }
 
+    fun showStatusMessage(resId: Int, vararg args: Any, durationMs: Long = 2500L) {
+        showStatusMessage(UiMessage.Resource(resId, args.toList()), durationMs)
+    }
+
     fun showStatusMessage(message: String, durationMs: Long = 2500L) {
+        showStatusMessage(UiMessage.Text(message), durationMs)
+    }
+
+    fun showStatusMessage(msg: UiMessage, durationMs: Long = 2500L) {
         viewModelScope.launch {
-            _uiState.update { it.copy(statusBannerMessage = message) }
-            appContext?.let { ctx ->
-                try {
-                    android.widget.Toast.makeText(ctx, message, android.widget.Toast.LENGTH_SHORT).show()
-                } catch (_: Exception) {}
-            }
+            _uiState.update { it.copy(statusBannerMessage = msg) }
             delay(durationMs)
             _uiState.update {
-                if (it.statusBannerMessage == message) it.copy(statusBannerMessage = null) else it
+                if (it.statusBannerMessage == msg) it.copy(statusBannerMessage = null) else it
             }
         }
     }
@@ -1669,13 +1673,13 @@ class LauncherViewModel : ViewModel() {
                             )
                         }
                     } else if (!silent) {
-                        showStatusMessage(getString(R.string.update_already_latest, BuildConfig.VERSION_NAME))
+                        showStatusMessage(R.string.update_already_latest, BuildConfig.VERSION_NAME)
                     }
                 }
                 .onFailure {
                     _uiState.update { it.copy(isCheckingUpdates = false) }
                     if (!silent) {
-                        showStatusMessage(getString(R.string.update_check_failed))
+                        showStatusMessage(R.string.update_check_failed)
                     }
                 }
         }
