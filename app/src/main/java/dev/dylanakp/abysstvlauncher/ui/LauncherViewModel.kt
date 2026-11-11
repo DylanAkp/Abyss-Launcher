@@ -281,6 +281,30 @@ class LauncherViewModel : ViewModel() {
         }
     }
 
+    private fun applyHistoryToSeriesDetails(
+        details: dev.dylanakp.abysstvlauncher.model.SeriesDetails?,
+        history: Map<String, PlaybackHistoryEntry>
+    ): dev.dylanakp.abysstvlauncher.model.SeriesDetails? {
+        if (details == null) return null
+        return details.copy(
+            seasons = details.seasons.map { season ->
+                season.copy(
+                    episodes = season.episodes.map { ep ->
+                        val entry = history[ep.id]
+                        if (entry != null) {
+                            ep.copy(
+                                progressPercent = entry.progressPercent,
+                                savedPositionMs = if (entry.progressPercent < 0.95f) entry.positionMs else 0L
+                            )
+                        } else {
+                            ep
+                        }
+                    }
+                )
+            }
+        )
+    }
+
     private fun recomputeDerivedState(
         current: LauncherUiState,
         movies: List<MediaItem> = current.movies,
@@ -353,12 +377,15 @@ class LauncherViewModel : ViewModel() {
             if (pool.isNotEmpty()) pool else (movies.take(4) + series.take(4))
         }
 
+        val enrichedSeriesDetails = applyHistoryToSeriesDetails(current.activeSeriesDetails, playbackHistory)
+
         return current.copy(
             selectedTab = selectedTab,
             movies = movies,
             series = series,
             tmdbTrending = tmdbTrending,
             playbackHistory = playbackHistory,
+            activeSeriesDetails = enrichedSeriesDetails,
             continueWatchingItems = continueWatching,
             continueWatchingMovies = continueMovies,
             continueWatchingSeries = continueSeries,
@@ -602,7 +629,7 @@ class LauncherViewModel : ViewModel() {
 
             _uiState.update {
                 it.copy(
-                    activeSeriesDetails = resolvedDetails,
+                    activeSeriesDetails = applyHistoryToSeriesDetails(resolvedDetails, it.playbackHistory),
                     isLoadingSeriesDetails = false
                 )
             }
@@ -1313,14 +1340,6 @@ class LauncherViewModel : ViewModel() {
         val jfConfig = _uiState.value.jellyfinConfig
 
         viewModelScope.launch(Dispatchers.IO) {
-            val targetIdx = allEpisodes.indexOfFirst { it.id == targetEpisode.id }
-            if (targetIdx != -1) {
-                for (i in 0..targetIdx) {
-                    val ep = allEpisodes[i]
-                    JellyfinRepository.markWatched(jfConfig, ep.id)
-                }
-            }
-
             PlaybackHistoryRepository.markEpisodesUpToWatched(
                 context = ctx,
                 seriesId = seriesItem.id,
@@ -1343,6 +1362,14 @@ class LauncherViewModel : ViewModel() {
             }
 
             showStatusMessage(R.string.msg_all_prev_watched, durationMs = 2500L)
+
+            val targetIdx = allEpisodes.indexOfFirst { it.id == targetEpisode.id }
+            if (targetIdx != -1) {
+                for (i in 0..targetIdx) {
+                    val ep = allEpisodes[i]
+                    JellyfinRepository.markWatched(jfConfig, ep.id)
+                }
+            }
         }
     }
 
@@ -1355,18 +1382,19 @@ class LauncherViewModel : ViewModel() {
         val jfConfig = _uiState.value.jellyfinConfig
 
         viewModelScope.launch(Dispatchers.IO) {
-            val isCurrentlyWatched = (PlaybackHistoryRepository.getEntry(ctx, targetEpisode.id)?.progressPercent ?: 0f) >= 0.95f
+            val isCurrentlyWatched = (PlaybackHistoryRepository.getEntry(ctx, targetEpisode.id)?.progressPercent ?: 0f) >= 0.95f ||
+                    (targetEpisode.progressPercent >= 0.95f && PlaybackHistoryRepository.getEntry(ctx, targetEpisode.id) == null)
             if (isCurrentlyWatched) {
                 PlaybackHistoryRepository.unmarkEpisodeWatched(
                     context = ctx,
                     seriesId = seriesItem.id,
-                    episode = targetEpisode,
+                    allEpisodes = allEpisodes,
+                    targetEpisode = targetEpisode,
                     title = seriesItem.title(),
                     posterUrl = seriesItem.posterUrl,
                     backdropUrl = seriesItem.backdropUrl.ifBlank { seriesItem.posterUrl },
                     category = MediaCategory.SERIES.name
                 )
-                JellyfinRepository.markUnwatched(jfConfig, targetEpisode.id)
             } else {
                 PlaybackHistoryRepository.markSingleEpisodeWatched(
                     context = ctx,
@@ -1378,7 +1406,6 @@ class LauncherViewModel : ViewModel() {
                     backdropUrl = seriesItem.backdropUrl.ifBlank { seriesItem.posterUrl },
                     category = MediaCategory.SERIES.name
                 )
-                JellyfinRepository.markWatched(jfConfig, targetEpisode.id)
             }
 
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
@@ -1394,6 +1421,55 @@ class LauncherViewModel : ViewModel() {
             val epCode = "S${targetEpisode.seasonNumber.toString().padStart(2, '0')}E${targetEpisode.episodeNumber.toString().padStart(2, '0')}"
             val resId = if (isCurrentlyWatched) R.string.msg_marked_unwatched else R.string.msg_marked_watched
             showStatusMessage(resId, epCode, durationMs = 2500L)
+
+            if (isCurrentlyWatched) {
+                JellyfinRepository.markUnwatched(jfConfig, targetEpisode.id)
+            } else {
+                JellyfinRepository.markWatched(jfConfig, targetEpisode.id)
+            }
+        }
+    }
+
+    fun unmarkEpisodesFrom(
+        seriesItem: MediaItem,
+        allEpisodes: List<SeriesEpisode>,
+        targetEpisode: SeriesEpisode
+    ) {
+        val ctx = appContext ?: return
+        val jfConfig = _uiState.value.jellyfinConfig
+
+        viewModelScope.launch(Dispatchers.IO) {
+            PlaybackHistoryRepository.unmarkEpisodesFrom(
+                context = ctx,
+                seriesId = seriesItem.id,
+                allEpisodes = allEpisodes,
+                targetEpisode = targetEpisode,
+                title = seriesItem.title(),
+                posterUrl = seriesItem.posterUrl,
+                backdropUrl = seriesItem.backdropUrl.ifBlank { seriesItem.posterUrl },
+                category = MediaCategory.SERIES.name
+            )
+
+            val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
+            withContext(Dispatchers.Default) {
+                val derived = recomputeDerivedState(
+                    current = _uiState.value,
+                    movies = applyHistoryToItems(_uiState.value.movies, updatedHistory),
+                    series = applyHistoryToItems(_uiState.value.series, updatedHistory),
+                    playbackHistory = updatedHistory
+                )
+                _uiState.value = derived
+            }
+
+            showStatusMessage(R.string.msg_all_following_unwatched, durationMs = 2500L)
+
+            val targetIdx = allEpisodes.indexOfFirst { it.id == targetEpisode.id }
+            if (targetIdx != -1) {
+                for (i in targetIdx until allEpisodes.size) {
+                    val ep = allEpisodes[i]
+                    JellyfinRepository.markUnwatched(jfConfig, ep.id)
+                }
+            }
         }
     }
 

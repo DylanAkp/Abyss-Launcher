@@ -145,6 +145,7 @@
     <string name="episode_action_mark_watched">Mark as Watched</string>
     <string name="episode_action_mark_unwatched">Mark as Unwatched</string>
     <string name="episode_action_mark_all_previous_watched">Mark Previous Episodes as Watched</string>
+    <string name="episode_action_mark_all_following_unwatched">Mark Subsequent Episodes as Unwatched</string>
     <string name="episode_action_cancel">Cancel</string>
 
     <string name="msg_sync_success">Jellyfin library synchronized successfully!</string>
@@ -160,6 +161,7 @@
     <string name="msg_marked_single_watched">Marked as watched</string>
     <string name="msg_marked_single_unwatched">Marked as unwatched</string>
     <string name="msg_all_prev_watched">All previous episodes marked as watched</string>
+    <string name="msg_all_following_unwatched">All subsequent episodes marked as unwatched</string>
     <string name="msg_series_complete">End of series • All episodes watched</string>
     <string name="msg_playing_next">Playing: %1$s</string>
     <string name="msg_seer_connected">Connected to Seer (%1$s)!</string>

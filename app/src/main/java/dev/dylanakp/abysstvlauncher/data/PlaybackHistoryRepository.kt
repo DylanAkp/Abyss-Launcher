@@ -321,7 +321,8 @@ object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
     fun unmarkEpisodeWatched(
         context: Context,
         seriesId: String,
-        episode: SeriesEpisode,
+        allEpisodes: List<SeriesEpisode>,
+        targetEpisode: SeriesEpisode,
         title: String = "",
         posterUrl: String = "",
         backdropUrl: String = "",
@@ -329,7 +330,7 @@ object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
     ) {
         ensureLoaded(context)
         val now = System.currentTimeMillis()
-        cache.remove(episode.id)
+        val targetIdx = allEpisodes.indexOfFirst { it.id == targetEpisode.id }
 
         val existingSeries = cache[seriesId]
         val resolvedTitle = title.ifBlank { existingSeries?.title.orEmpty() }
@@ -337,15 +338,113 @@ object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
         val resolvedBackdrop = backdropUrl.ifBlank { existingSeries?.backdropUrl.orEmpty() }
         val resolvedCategory = category.ifBlank { existingSeries?.category.orEmpty() }.ifBlank { "SERIES" }
 
-        val epDuration = if (episode.savedDurationMs > 0L) episode.savedDurationMs else 1_800_000L
+        val epDuration = if (targetEpisode.savedDurationMs > 0L) targetEpisode.savedDurationMs else 1_800_000L
+        val unmarkEntry = PlaybackHistoryEntry(
+            itemId = targetEpisode.id,
+            seriesId = seriesId,
+            seasonNumber = targetEpisode.seasonNumber,
+            episodeNumber = targetEpisode.episodeNumber,
+            episodeTitle = targetEpisode.title,
+            streamUrl = targetEpisode.streamUrl,
+            positionMs = 0L,
+            durationMs = epDuration,
+            lastPlayedTimestamp = now,
+            title = resolvedTitle,
+            posterUrl = targetEpisode.posterUrl.ifBlank { resolvedPoster },
+            backdropUrl = resolvedBackdrop,
+            category = resolvedCategory
+        )
+        cache[targetEpisode.id] = unmarkEntry
+
+        val resumeEpisode = when {
+            targetIdx > 0 -> {
+                allEpisodes.take(targetIdx).reversed().firstOrNull { ep ->
+                    (cache[ep.id]?.progressPercent ?: 0f) < 0.95f
+                } ?: targetEpisode
+            }
+            else -> targetEpisode
+        }
+
+        val resumeDuration = if (resumeEpisode.savedDurationMs > 0L) resumeEpisode.savedDurationMs else 1_800_000L
+        val savedPos = if (resumeEpisode.id == targetEpisode.id) 0L else (cache[resumeEpisode.id]?.positionMs ?: 0L)
         val seriesEntry = PlaybackHistoryEntry(
             itemId = seriesId,
             seriesId = seriesId,
-            seasonNumber = episode.seasonNumber,
-            episodeNumber = episode.episodeNumber,
-            episodeTitle = episode.title,
-            streamUrl = episode.streamUrl,
-            positionMs = 1L,
+            seasonNumber = resumeEpisode.seasonNumber,
+            episodeNumber = resumeEpisode.episodeNumber,
+            episodeTitle = resumeEpisode.title,
+            streamUrl = resumeEpisode.streamUrl,
+            positionMs = savedPos,
+            durationMs = resumeDuration,
+            lastPlayedTimestamp = now,
+            title = resolvedTitle,
+            posterUrl = resolvedPoster,
+            backdropUrl = resolvedBackdrop,
+            category = resolvedCategory
+        )
+        cache[seriesId] = seriesEntry
+
+        scope.launch {
+            val dao = AbyssDatabase.getInstance(context).playbackHistoryDao()
+            dao.upsert(PlaybackHistoryEntity.fromDomain(unmarkEntry))
+            dao.upsert(PlaybackHistoryEntity.fromDomain(seriesEntry))
+        }
+    }
+
+    fun unmarkEpisodesFrom(
+        context: Context,
+        seriesId: String,
+        allEpisodes: List<SeriesEpisode>,
+        targetEpisode: SeriesEpisode,
+        title: String = "",
+        posterUrl: String = "",
+        backdropUrl: String = "",
+        category: String = ""
+    ) {
+        ensureLoaded(context)
+        val now = System.currentTimeMillis()
+        val targetIdx = allEpisodes.indexOfFirst { it.id == targetEpisode.id }
+        if (targetIdx == -1) return
+
+        val existingSeries = cache[seriesId]
+        val resolvedTitle = title.ifBlank { existingSeries?.title.orEmpty() }
+        val resolvedPoster = posterUrl.ifBlank { existingSeries?.posterUrl.orEmpty() }
+        val resolvedBackdrop = backdropUrl.ifBlank { existingSeries?.backdropUrl.orEmpty() }
+        val resolvedCategory = category.ifBlank { existingSeries?.category.orEmpty() }.ifBlank { "SERIES" }
+
+        val unmarkEntries = mutableListOf<PlaybackHistoryEntity>()
+        for (i in targetIdx until allEpisodes.size) {
+            val ep = allEpisodes[i]
+            val epDuration = if (ep.savedDurationMs > 0L) ep.savedDurationMs else 1_800_000L
+            val entry = PlaybackHistoryEntry(
+                itemId = ep.id,
+                seriesId = seriesId,
+                seasonNumber = ep.seasonNumber,
+                episodeNumber = ep.episodeNumber,
+                episodeTitle = ep.title,
+                streamUrl = ep.streamUrl,
+                positionMs = 0L,
+                durationMs = epDuration,
+                lastPlayedTimestamp = now,
+                title = resolvedTitle,
+                posterUrl = ep.posterUrl.ifBlank { resolvedPoster },
+                backdropUrl = resolvedBackdrop,
+                category = resolvedCategory
+            )
+            cache[ep.id] = entry
+            unmarkEntries.add(PlaybackHistoryEntity.fromDomain(entry))
+        }
+
+        val resumeEpisode = targetEpisode
+        val epDuration = if (resumeEpisode.savedDurationMs > 0L) resumeEpisode.savedDurationMs else 1_800_000L
+        val seriesEntry = PlaybackHistoryEntry(
+            itemId = seriesId,
+            seriesId = seriesId,
+            seasonNumber = resumeEpisode.seasonNumber,
+            episodeNumber = resumeEpisode.episodeNumber,
+            episodeTitle = resumeEpisode.title,
+            streamUrl = resumeEpisode.streamUrl,
+            positionMs = 0L,
             durationMs = epDuration,
             lastPlayedTimestamp = now,
             title = resolvedTitle,
@@ -357,7 +456,7 @@ object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
 
         scope.launch {
             val dao = AbyssDatabase.getInstance(context).playbackHistoryDao()
-            dao.delete(episode.id)
+            dao.upsertAll(unmarkEntries)
             dao.upsert(PlaybackHistoryEntity.fromDomain(seriesEntry))
         }
     }

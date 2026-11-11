@@ -91,6 +91,7 @@ fun SeriesDetailScreen(
     onPlayEpisode: (SeriesEpisode, SeriesEpisode?, Long) -> Unit,
     onMarkEpisodesWatched: ((List<SeriesEpisode>, SeriesEpisode) -> Unit)? = null,
     onToggleSingleEpisodeWatched: ((List<SeriesEpisode>, SeriesEpisode) -> Unit)? = null,
+    onMarkEpisodesUnwatchedFrom: ((List<SeriesEpisode>, SeriesEpisode) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var episodeForMenu by remember { mutableStateOf<SeriesEpisode?>(null) }
@@ -108,14 +109,14 @@ fun SeriesDetailScreen(
     val seasons = seriesDetails?.seasons.orEmpty()
     val seriesResumeEntry = playbackHistory[seriesItem.id]
 
-    var selectedSeasonIndex by remember(seriesDetails) {
+    var selectedSeasonIndex by remember(seriesItem.id) {
         val initialIdx = if (seriesResumeEntry != null && seasons.isNotEmpty()) {
             seasons.indexOfFirst { it.seasonNumber == seriesResumeEntry.seasonNumber }.coerceAtLeast(0)
         } else 0
         mutableIntStateOf(initialIdx)
     }
 
-    val currentSeason = seasons.getOrNull(selectedSeasonIndex)
+    val currentSeason = seasons.getOrNull(selectedSeasonIndex.coerceIn(0, (seasons.size - 1).coerceAtLeast(0)))
     val episodes = currentSeason?.episodes.orEmpty()
 
     // Helper to get unified progress combining local database history and server (Jellyfin) progress
@@ -123,6 +124,7 @@ fun SeriesDetailScreen(
         val hist = playbackHistory[ep.id]
         return when {
             hist != null -> hist.progressPercent
+            playbackHistory.containsKey(ep.id) -> 0f
             ep.progressPercent > 0f -> ep.progressPercent
             else -> 0f
         }
@@ -519,6 +521,12 @@ fun SeriesDetailScreen(
                 episodeForMenu = null
                 val allEps = seasons.flatMap { it.episodes }
                 onMarkEpisodesWatched?.invoke(allEps, targetEp)
+            },
+            onMarkAllFollowingUnwatched = {
+                val targetEp = episodeForMenu ?: return@EpisodeContextMenu
+                episodeForMenu = null
+                val allEps = seasons.flatMap { it.episodes }
+                onMarkEpisodesUnwatchedFrom?.invoke(allEps, targetEp)
             }
         )
     }

@@ -205,6 +205,9 @@ fun MainScreen(
             },
             onToggleSingleEpisodeWatched = { allEpisodes, targetEpisode ->
                 viewModel.toggleSingleEpisodeWatched(selectedSeries, allEpisodes, targetEpisode)
+            },
+            onMarkEpisodesUnwatchedFrom = { allEpisodes, targetEpisode ->
+                viewModel.unmarkEpisodesFrom(selectedSeries, allEpisodes, targetEpisode)
             }
         )
         return

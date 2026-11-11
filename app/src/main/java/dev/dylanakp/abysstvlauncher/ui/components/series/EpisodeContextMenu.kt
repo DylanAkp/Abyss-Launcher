@@ -55,7 +55,8 @@ fun EpisodeContextMenu(
     isWatched: Boolean,
     onDismiss: () -> Unit,
     onToggleSingleWatched: () -> Unit,
-    onMarkAllPreviousWatched: () -> Unit
+    onMarkAllPreviousWatched: () -> Unit,
+    onMarkAllFollowingUnwatched: () -> Unit
 ) {
     AnimatedVisibility(
         visible = episode != null,
@@ -153,6 +154,12 @@ fun EpisodeContextMenu(
                         label = stringResource(R.string.episode_action_mark_all_previous_watched),
                         icon = AbyssIconType.CHECK,
                         onClick = onMarkAllPreviousWatched
+                    )
+
+                    EpisodeContextMenuItem(
+                        label = stringResource(R.string.episode_action_mark_all_following_unwatched),
+                        icon = AbyssIconType.CLOSE,
+                        onClick = onMarkAllFollowingUnwatched
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))

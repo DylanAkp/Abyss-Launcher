@@ -145,6 +145,7 @@
     <string name="episode_action_mark_watched">Marquer comme vu</string>
     <string name="episode_action_mark_unwatched">Marquer comme non vu</string>
     <string name="episode_action_mark_all_previous_watched">Marquer les épisodes précédents comme vus</string>
+    <string name="episode_action_mark_all_following_unwatched">Marquer tous les suivants comme non vus</string>
     <string name="episode_action_cancel">Annuler</string>
 
     <string name="msg_sync_success">Bibliothèque Jellyfin synchronisée avec succès !</string>
@@ -160,6 +161,7 @@
     <string name="msg_marked_single_watched">Marqué comme vu</string>
     <string name="msg_marked_single_unwatched">Marqué comme non vu</string>
     <string name="msg_all_prev_watched">Tous les épisodes précédents marqués comme vus</string>
+    <string name="msg_all_following_unwatched">Tous les épisodes suivants marqués comme non vus</string>
     <string name="msg_series_complete">Fin de la série • Tous les épisodes visionnés</string>
     <string name="msg_playing_next">Lecture : %1$s</string>
     <string name="msg_seer_connected">Connecté à Seer (%1$s) !</string>
