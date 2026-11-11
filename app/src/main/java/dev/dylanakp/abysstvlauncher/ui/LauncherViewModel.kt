@@ -1,6 +1,8 @@
 package dev.dylanakp.abysstvlauncher.ui
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -80,8 +82,11 @@ data class LauncherUiState(
     val focusedMediaPreview: MediaItem? = null,
     val selectedMediaForDetails: MediaItem? = null,
 
-    // Built-in Player & Series Episode Picker state
+    // Built-in Player, Movie & Series Detail state
     val activePlayerSession: PlayerSession? = null,
+    val selectedMovieForDetails: MediaItem? = null,
+    val activeMovieDetails: dev.dylanakp.abysstvlauncher.model.MovieDetails? = null,
+    val isLoadingMovieDetails: Boolean = false,
     val selectedSeriesForEpisodes: MediaItem? = null,
     val activeSeriesDetails: SeriesDetails? = null,
     val isLoadingSeriesDetails: Boolean = false,
@@ -423,11 +428,7 @@ class LauncherViewModel : ViewModel() {
             }
         }
 
-        if (playableMovieItem.streamUrl.isNotBlank()) {
-            launchMoviePlayback(context, playableMovieItem)
-        } else {
-            openMediaDetails(item)
-        }
+        openMovieDetails(playableMovieItem)
     }
 
     private fun launchMoviePlayback(context: Context, item: MediaItem) {
@@ -483,6 +484,106 @@ class LauncherViewModel : ViewModel() {
                 playbackHistory = updatedHistory
             )
             _uiState.value = derived
+        }
+    }
+
+    fun openMovieDetails(movieItem: MediaItem) {
+        _uiState.update {
+            it.copy(
+                selectedMovieForDetails = movieItem,
+                activeMovieDetails = null,
+                isLoadingMovieDetails = true
+            )
+        }
+        viewModelScope.launch {
+            val details = JellyfinRepository.fetchMovieDetails(_uiState.value.jellyfinConfig, movieItem)
+            _uiState.update {
+                it.copy(
+                    activeMovieDetails = details,
+                    isLoadingMovieDetails = false
+                )
+            }
+        }
+    }
+
+    fun closeMovieDetails() {
+        _uiState.update {
+            it.copy(
+                selectedMovieForDetails = null,
+                activeMovieDetails = null,
+                isLoadingMovieDetails = false
+            )
+        }
+    }
+
+    fun selectMovieVersion(versionId: String) {
+        val current = _uiState.value.activeMovieDetails ?: return
+        _uiState.update {
+            it.copy(activeMovieDetails = current.copy(selectedVersionId = versionId))
+        }
+    }
+
+    fun playMovie(context: Context, item: MediaItem, versionId: String? = null) {
+        val config = _uiState.value.jellyfinConfig
+        val jfId = item.jellyfinId.ifBlank { item.id }
+        val streamUrl = if (config.isConfigured && jfId.isNotBlank()) {
+            JellyfinRepository.getStreamUrl(config, jfId, versionId)
+        } else {
+            JellyfinRepository.sanitizeStreamUrl(item.streamUrl, config, versionId)
+        }
+        launchMoviePlayback(context, item.copy(streamUrl = streamUrl))
+    }
+
+    fun playTrailer(context: Context, trailerUrl: String, title: String) {
+        if (trailerUrl.isBlank()) return
+        if (trailerUrl.contains("/Videos/") && trailerUrl.contains("/stream")) {
+            val session = PlayerSession(
+                mediaItem = MediaItem(
+                    id = "trailer_${System.currentTimeMillis()}",
+                    title = title,
+                    localizedTitle = title,
+                    category = MediaCategory.MOVIE,
+                    streamUrl = trailerUrl
+                ),
+                streamUrl = trailerUrl,
+                title = title,
+                subtitle = "Bande-annonce",
+                startPositionMs = 0L
+            )
+            _uiState.update { it.copy(activePlayerSession = session) }
+        } else {
+            val key = if (trailerUrl.contains("v=")) {
+                trailerUrl.substringAfter("v=").substringBefore("&")
+            } else if (trailerUrl.contains("youtu.be/")) {
+                trailerUrl.substringAfter("youtu.be/").substringBefore("?")
+            } else null
+
+            val launched = try {
+                val intent = if (key != null) {
+                    Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$key")).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                } else {
+                    Intent(Intent.ACTION_VIEW, Uri.parse(trailerUrl)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                }
+                context.startActivity(intent)
+                true
+            } catch (_: Exception) {
+                try {
+                    val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse(trailerUrl)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(webIntent)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+            if (!launched) {
+                showStatusMessage(getString(R.string.toast_trailer_unavailable), 2500L)
+            }
         }
     }
 
@@ -1058,6 +1159,9 @@ class LauncherViewModel : ViewModel() {
         }
         if (_uiState.value.isSearchActive) {
             setSearchActive(false)
+        }
+        if (_uiState.value.selectedMovieForDetails != null) {
+            closeMovieDetails()
         }
         if (_uiState.value.selectedSeriesForEpisodes != null) {
             closeSeriesEpisodePicker()
