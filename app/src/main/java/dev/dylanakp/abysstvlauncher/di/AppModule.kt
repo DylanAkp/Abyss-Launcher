@@ -29,10 +29,17 @@ import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModelOf
+import org.koin.core.qualifier.named
 import org.koin.dsl.module
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import java.util.concurrent.TimeUnit
 
 val appModule = module {
+    single<CoroutineDispatcher>(named("io")) { Dispatchers.IO }
+    single<CoroutineDispatcher>(named("default")) { Dispatchers.Default }
+    single<CoroutineDispatcher>(named("main")) { Dispatchers.Main }
+
     single {
         OkHttpClient.Builder()
             .dns(PreferIpv4Dns)

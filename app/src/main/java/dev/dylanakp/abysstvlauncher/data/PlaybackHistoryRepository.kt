@@ -9,7 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import dev.dylanakp.abysstvlauncher.domain.repository.PlaybackHistoryRepository as IPlaybackHistoryRepository
 import org.koin.core.component.KoinComponent
@@ -30,9 +30,8 @@ object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
     override fun ensureLoaded(context: Context?) {
         if (isLoaded) return
         isLoaded = true
-        context?.let { migrateLegacyFileIfPresent(it) }
-
-        runBlocking(Dispatchers.IO) {
+        scope.launch {
+            context?.let { migrateLegacyFileIfPresent(it) }
             val dao = database.playbackHistoryDao()
             val entities = dao.getAll()
             entities.forEach { entity ->
@@ -48,9 +47,9 @@ object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
         }
     }
 
-    private fun migrateLegacyFileIfPresent(context: Context) {
+    private suspend fun migrateLegacyFileIfPresent(context: Context) = withContext(Dispatchers.IO) {
         val file = File(context.filesDir, LEGACY_HISTORY_FILE)
-        if (!file.exists()) return
+        if (!file.exists()) return@withContext
 
         runCatching {
             val raw = file.readText()
@@ -58,9 +57,7 @@ object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
                 val entries = json.decodeFromString<List<PlaybackHistoryEntry>>(raw)
                 val entities = entries.map { PlaybackHistoryEntity.fromDomain(it) }
                 if (entities.isNotEmpty()) {
-                    runBlocking(Dispatchers.IO) {
-                        AbyssDatabase.getInstance(context).playbackHistoryDao().upsertAll(entities)
-                    }
+                    AbyssDatabase.getInstance(context).playbackHistoryDao().upsertAll(entities)
                 }
             }
             file.delete()

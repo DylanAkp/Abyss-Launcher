@@ -76,7 +76,6 @@ interface MediaLibraryCache {
     suspend fun clear(context: Context? = null)
     suspend fun save(context: Context? = null, library: SyncedLibrary)
     suspend fun load(context: Context? = null): SyncedLibrary?
-    fun loadSync(context: Context? = null): SyncedLibrary?
 }
 
 interface PlaybackHistoryRepository {

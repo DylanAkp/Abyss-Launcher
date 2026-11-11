@@ -17,9 +17,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -190,37 +187,31 @@ object SeerRepository : ISeerRepository, KoinComponent {
         }
 
         try {
-            val url = URL("$server/api/v1/auth/jellyfin")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 10_000
-                readTimeout = 15_000
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Accept", "application/json")
-            }
-
             val body = json.encodeToString(SeerLoginRequest(username = user, password = pass))
-            OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(body) }
+                .toRequestBody("application/json".toMediaType())
+            val request = Request.Builder()
+                .url("$server/api/v1/auth/jellyfin")
+                .post(body)
+                .header("Accept", "application/json")
+                .build()
 
-            val code = conn.responseCode
-            if (code in 200..299) {
-                val cookies = conn.headerFields["Set-Cookie"].orEmpty()
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful) {
+                val cookies = response.headers("Set-Cookie")
                 val sessionCookie = cookies.find { it.startsWith("connect.sid=") }
                     ?.substringBefore(";")
 
                 var apiKey = ""
                 if (!sessionCookie.isNullOrBlank()) {
                     try {
-                        val settingsConn = (URL("$server/api/v1/settings/main").openConnection() as HttpURLConnection).apply {
-                            requestMethod = "GET"
-                            connectTimeout = 8_000
-                            readTimeout = 8_000
-                            setRequestProperty("Cookie", sessionCookie)
-                            setRequestProperty("Accept", "application/json")
-                        }
-                        if (settingsConn.responseCode in 200..299) {
-                            val settingsJson = settingsConn.inputStream.bufferedReader().use { it.readText() }
+                        val settingsReq = Request.Builder()
+                            .url("$server/api/v1/settings/main")
+                            .header("Cookie", sessionCookie)
+                            .header("Accept", "application/json")
+                            .build()
+                        val settingsResp = client.newCall(settingsReq).execute()
+                        if (settingsResp.isSuccessful) {
+                            val settingsJson = settingsResp.body?.string().orEmpty()
                             apiKey = json.decodeFromString<SeerSettingsResponse>(settingsJson).apiKey
                         }
                     } catch (_: Exception) {}
@@ -233,8 +224,8 @@ object SeerRepository : ISeerRepository, KoinComponent {
                 }
                 Result.success(finalToken)
             } else {
-                val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $code"
-                Result.failure(Exception("Authentication failed ($code): $err"))
+                val err = response.body?.string() ?: "HTTP ${response.code}"
+                Result.failure(Exception("Authentication failed (${response.code}): $err"))
             }
         } catch (e: Exception) {
             Result.failure(e)

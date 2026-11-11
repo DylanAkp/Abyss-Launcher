@@ -188,7 +188,7 @@ class LauncherViewModel : ViewModel() {
 
         // 1. Parallel load of local disk cache, playback history, and installed apps on IO
         viewModelScope.launch(Dispatchers.IO) {
-            val cachedDeferred = async { MediaLibraryCache.loadSync(context) }
+            val cachedDeferred = async { MediaLibraryCache.load(context) }
             val historyDeferred = async { PlaybackHistoryRepository.getAllEntries(context) }
             val appsDeferred = async {
                 AppRepository.loadInstalledApps(
@@ -1074,7 +1074,7 @@ class LauncherViewModel : ViewModel() {
             prefs?.seerConfig = updatedConfig
 
             appContext?.let { ctx ->
-                val currentLib = MediaLibraryCache.loadSync(ctx)
+                val currentLib = MediaLibraryCache.load(ctx)
                 val updatedLib = (currentLib ?: SyncedLibrary()).copy(
                     seerTrending = enrichedTrending,
                     seerPopularMovies = enrichedPopMovies,

@@ -6,7 +6,6 @@ import dev.dylanakp.abysstvlauncher.data.local.MediaItemEntity
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.SyncedLibrary
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -76,10 +75,6 @@ object MediaLibraryCache : IMediaLibraryCache, KoinComponent {
                 seerRequests = seerRequests
             )
         }
-    }
-
-    override fun loadSync(context: Context?): SyncedLibrary? = runBlocking(Dispatchers.IO) {
-        load(context)
     }
 
     private suspend fun migrateLegacyFileIfPresent(context: Context) {

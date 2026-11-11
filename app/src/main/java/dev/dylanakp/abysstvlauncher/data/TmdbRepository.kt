@@ -18,7 +18,6 @@ import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.net.HttpURLConnection
 import java.net.URL
 import java.text.Normalizer
 import java.util.Locale

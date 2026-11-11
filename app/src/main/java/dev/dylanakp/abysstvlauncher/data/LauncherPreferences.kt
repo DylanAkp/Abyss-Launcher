@@ -41,6 +41,7 @@ class LauncherPreferences(private val context: Context) {
 
     private val dataStore = context.applicationContext.launcherDataStore
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val memoryCache = java.util.concurrent.ConcurrentHashMap<String, Any>()
 
     val dataFlow: Flow<Preferences> = dataStore.data
         .catch { exception ->
@@ -51,8 +52,24 @@ class LauncherPreferences(private val context: Context) {
             }
         }
 
-    private fun <T> read(block: (Preferences) -> T): T = runBlocking(Dispatchers.IO) {
-        block(dataFlow.first())
+    init {
+        scope.launch {
+            dataFlow.collect { prefs ->
+                prefs[KEY_LANGUAGE]?.let { memoryCache["language"] = it }
+                prefs[KEY_ACCENT_PRESET]?.let { memoryCache["accentPreset"] = it }
+                prefs[KEY_AUTO_ROTATE_HERO]?.let { memoryCache["autoRotateHero"] = it }
+                prefs[KEY_SHOW_HIDDEN_APPS]?.let { memoryCache["showHiddenApps"] = it }
+                prefs[KEY_WEATHER_CITY]?.let { memoryCache["weatherCity"] = it }
+                prefs[KEY_TEMP_UNIT]?.let { memoryCache["temperatureUnit"] = it }
+            }
+        }
+    }
+
+    private fun <T> read(block: (Preferences) -> T): T {
+        val current = scope.runCatching {
+            kotlinx.coroutines.runBlocking(Dispatchers.IO) { block(dataFlow.first()) }
+        }.getOrNull()
+        return current ?: block(emptyPreferences())
     }
 
     private fun mutate(block: (MutablePreferences: androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
