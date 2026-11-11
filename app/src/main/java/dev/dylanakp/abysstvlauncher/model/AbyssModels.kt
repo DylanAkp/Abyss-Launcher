@@ -133,6 +133,36 @@ data class SeriesDetails(
 )
 
 @Immutable
+data class MediaVersion(
+    val id: String,
+    val name: String,
+    val container: String = "",
+    val resolution: String = "",
+    val videoCodec: String = "",
+    val audioCodec: String = "",
+    val sizeBytes: Long = 0L,
+    val bitrate: Long = 0L
+) {
+    val displaySize: String
+        get() = if (sizeBytes > 0L) {
+            val gb = sizeBytes.toDouble() / (1024 * 1024 * 1024)
+            String.format(java.util.Locale.US, "%.1f GB", gb)
+        } else ""
+}
+
+@Immutable
+data class MovieDetails(
+    val movieItem: MediaItem,
+    val tagline: String = "",
+    val genres: List<String> = emptyList(),
+    val versions: List<MediaVersion> = emptyList(),
+    val selectedVersionId: String = "",
+    val trailerUrl: String = "",
+    val trailerName: String = "",
+    val isLocalTrailer: Boolean = false
+)
+
+@Immutable
 data class PlaybackHistoryEntry(
     val itemId: String,
     val seriesId: String = "",
