@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -88,7 +89,14 @@ fun AbyssSearchScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val firstResultFocusRequester = remember { FocusRequester() }
     val clearButtonFocusRequester = remember { FocusRequester() }
+    val searchResultsListState = rememberLazyListState()
     var isInputFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(query) {
+        if (searchResultsListState.firstVisibleItemIndex > 0 || searchResultsListState.firstVisibleItemScrollOffset > 0) {
+            searchResultsListState.scrollToItem(0, 0)
+        }
+    }
 
     // Focus the search field and summon the integrated TV keyboard on entry
     LaunchedEffect(Unit) {
@@ -507,6 +515,7 @@ fun AbyssSearchScreen(
                 }
             } else {
                 LazyColumn(
+                    state = searchResultsListState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 36.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
