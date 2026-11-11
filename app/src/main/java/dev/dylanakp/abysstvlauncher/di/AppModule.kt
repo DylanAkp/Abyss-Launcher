@@ -19,6 +19,11 @@ import dev.dylanakp.abysstvlauncher.domain.repository.WeatherRepository as IWeat
 import dev.dylanakp.abysstvlauncher.player.PlayerManager
 import dev.dylanakp.abysstvlauncher.player.PlayerManagerImpl
 import dev.dylanakp.abysstvlauncher.ui.LauncherViewModel
+import dev.dylanakp.abysstvlauncher.ui.viewmodels.CatalogViewModel
+import dev.dylanakp.abysstvlauncher.ui.viewmodels.DiscoverViewModel
+import dev.dylanakp.abysstvlauncher.ui.viewmodels.HomeViewModel
+import dev.dylanakp.abysstvlauncher.ui.viewmodels.PlayerViewModel
+import dev.dylanakp.abysstvlauncher.ui.viewmodels.SettingsViewModel
 import kotlinx.serialization.json.Json
 import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
@@ -69,4 +74,9 @@ val appModule = module {
     single<PlayerManager> { PlayerManagerImpl(androidContext()) }
 
     viewModelOf(::LauncherViewModel)
+    viewModelOf(::HomeViewModel)
+    viewModelOf(::CatalogViewModel)
+    viewModelOf(::DiscoverViewModel)
+    viewModelOf(::SettingsViewModel)
+    viewModelOf(::PlayerViewModel)
 }
