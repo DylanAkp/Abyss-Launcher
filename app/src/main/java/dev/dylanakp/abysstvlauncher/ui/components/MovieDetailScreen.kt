@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -81,6 +82,7 @@ fun MovieDetailScreen(
     }
 
     val playButtonRequester = remember { FocusRequester() }
+    val versionMenuFirstItemRequester = remember { FocusRequester() }
     val versions = movieDetails?.versions.orEmpty()
     val selectedVersion = versions.firstOrNull { it.id == movieDetails?.selectedVersionId }
         ?: versions.firstOrNull()
@@ -99,6 +101,19 @@ fun MovieDetailScreen(
         try {
             playButtonRequester.requestFocus()
         } catch (_: Exception) {}
+    }
+
+    LaunchedEffect(showVersionMenu) {
+        if (showVersionMenu) {
+            delay(100L)
+            try {
+                versionMenuFirstItemRequester.requestFocus()
+            } catch (_: Exception) {}
+        } else {
+            try {
+                playButtonRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
     }
 
     Box(
@@ -344,11 +359,12 @@ fun MovieDetailScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(versions) { ver ->
+                            itemsIndexed(versions) { index, ver ->
                                 val isSelected = ver.id == selectedVersion?.id
                                 VersionSelectionCard(
                                     version = ver,
                                     isSelected = isSelected,
+                                    focusRequester = if (index == 0) versionMenuFirstItemRequester else null,
                                     onClick = {
                                         onSelectVersion(ver.id)
                                         showVersionMenu = false
@@ -389,12 +405,14 @@ private fun MovieMetaBadge(
 private fun VersionSelectionCard(
     version: MediaVersion,
     isSelected: Boolean,
+    focusRequester: FocusRequester? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .fillMaxWidth()
             .scale(if (isFocused) 1.02f else 1f)
             .clip(RoundedCornerShape(12.dp))

@@ -478,7 +478,7 @@ fun AbyssPlayerScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = playerError ?: "",
+                        text = playerError,
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = AbyssTextPrimary
                     )
