@@ -279,6 +279,37 @@ object TmdbRepository {
         return list
     }
 
+    suspend fun fetchMovieTrailer(tmdbId: Int): Pair<String, String>? = withContext(Dispatchers.IO) {
+        if (API_KEY.isBlank() || tmdbId <= 0) return@withContext null
+        val lang = Locale.getDefault().toLanguageTag()
+        val url = "$BASE_URL/movie/$tmdbId/videos?api_key=$API_KEY&language=$lang"
+        val raw = httpGet(url) ?: httpGet("$BASE_URL/movie/$tmdbId/videos?api_key=$API_KEY&language=en-US") ?: return@withContext null
+        try {
+            val root = JSONObject(raw)
+            val results = root.optJSONArray("results") ?: return@withContext null
+            var fallbackKey: String? = null
+            var fallbackName = "Trailer"
+            for (i in 0 until results.length()) {
+                val obj = results.optJSONObject(i) ?: continue
+                val site = obj.optString("site", "")
+                val type = obj.optString("type", "")
+                val key = obj.optString("key", "")
+                val name = obj.optString("name", "Trailer")
+                if (site.equals("YouTube", ignoreCase = true) && key.isNotBlank()) {
+                    if (type.equals("Trailer", ignoreCase = true)) {
+                        return@withContext Pair("https://www.youtube.com/watch?v=$key", name)
+                    } else if (fallbackKey == null) {
+                        fallbackKey = key
+                        fallbackName = name
+                    }
+                }
+            }
+            if (fallbackKey != null) Pair("https://www.youtube.com/watch?v=$fallbackKey", fallbackName) else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun normalizeForSearch(str: String): String {
         val nfd = Normalizer.normalize(str, Normalizer.Form.NFD)
         return nfd.replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
