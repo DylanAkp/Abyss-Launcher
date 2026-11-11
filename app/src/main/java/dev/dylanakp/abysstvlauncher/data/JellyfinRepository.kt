@@ -5,6 +5,8 @@ import android.util.Log
 import dev.dylanakp.abysstvlauncher.model.JellyfinConfig
 import dev.dylanakp.abysstvlauncher.model.MediaCategory
 import dev.dylanakp.abysstvlauncher.model.MediaItem
+import dev.dylanakp.abysstvlauncher.model.MediaVersion
+import dev.dylanakp.abysstvlauncher.model.MovieDetails
 import dev.dylanakp.abysstvlauncher.model.SeriesDetails
 import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
 import dev.dylanakp.abysstvlauncher.model.SeriesSeason
@@ -196,22 +198,27 @@ object JellyfinRepository {
         }
     }
 
-    fun getStreamUrl(config: JellyfinConfig, itemId: String): String {
+    fun getStreamUrl(config: JellyfinConfig, itemId: String, mediaSourceId: String? = null): String {
         val server = cleanUrl(config.serverUrl)
         val token = config.accessToken
         val userId = config.userId
         val userParam = if (userId.isNotBlank()) "&userId=$userId" else ""
-        return "$server/Videos/$itemId/stream?static=true&api_key=$token$userParam"
+        val sourceParam = if (!mediaSourceId.isNullOrBlank()) "&MediaSourceId=$mediaSourceId" else ""
+        return "$server/Videos/$itemId/stream?static=true&api_key=$token$userParam$sourceParam"
     }
 
-    fun sanitizeStreamUrl(streamUrl: String, config: JellyfinConfig): String {
+    fun sanitizeStreamUrl(streamUrl: String, config: JellyfinConfig, mediaSourceId: String? = null): String {
         if (streamUrl.isBlank() || config.userId.isBlank()) return streamUrl
-        return if (!streamUrl.contains("userId=")) {
+        var url = if (!streamUrl.contains("userId=")) {
             if (streamUrl.contains("?")) "$streamUrl&userId=${config.userId}"
             else "$streamUrl?userId=${config.userId}"
         } else {
             streamUrl
         }
+        if (!mediaSourceId.isNullOrBlank() && !url.contains("MediaSourceId=")) {
+            url = "$url&MediaSourceId=$mediaSourceId"
+        }
+        return url
     }
 
     fun getImageUrl(serverUrl: String, itemId: String, isBackdrop: Boolean = false): String {
@@ -596,6 +603,157 @@ object JellyfinRepository {
         } catch (_: Exception) {
             null
         }
+    }
+
+    suspend fun fetchMovieDetails(config: JellyfinConfig, movieItem: MediaItem): MovieDetails = withContext(Dispatchers.IO) {
+        val server = cleanUrl(config.serverUrl)
+        val userId = config.userId
+        val token = config.accessToken
+        val jfId = movieItem.jellyfinId.ifBlank { movieItem.id }
+
+        var tagline = ""
+        val genres = mutableListOf<String>()
+        val versions = mutableListOf<MediaVersion>()
+        var trailerUrl = ""
+        var trailerName = ""
+        var isLocalTrailer = false
+
+        if (config.isConfigured && jfId.isNotBlank()) {
+            try {
+                val url = "$server/Users/$userId/Items/$jfId"
+                val raw = httpGet(url, token)
+                if (raw != null) {
+                    val obj = JSONObject(raw)
+                    val taglinesArr = obj.optJSONArray("Taglines")
+                    tagline = if (taglinesArr != null && taglinesArr.length() > 0) {
+                        taglinesArr.optString(0, "")
+                    } else {
+                        obj.optString("OverviewTagline", obj.optString("Tagline", ""))
+                    }.removePrefix("[\"").removeSuffix("\"]").removeSurrounding("\"").trim()
+                    val genresArr = obj.optJSONArray("Genres")
+                    if (genresArr != null) {
+                        for (i in 0 until genresArr.length()) {
+                            genres.add(genresArr.optString(i))
+                        }
+                    }
+
+                    val mediaSources = obj.optJSONArray("MediaSources")
+                    if (mediaSources != null) {
+                        for (i in 0 until mediaSources.length()) {
+                            val src = mediaSources.optJSONObject(i) ?: continue
+                            val srcId = src.optString("Id", "")
+                            var srcName = src.optString("Name", "")
+                            val container = src.optString("Container", "")
+                            val size = src.optLong("Size", 0L)
+                            val bitrate = src.optLong("Bitrate", 0L)
+
+                            var resStr = ""
+                            var vCodec = ""
+                            var aCodec = ""
+                            val streams = src.optJSONArray("MediaStreams")
+                            if (streams != null) {
+                                for (j in 0 until streams.length()) {
+                                    val stream = streams.optJSONObject(j) ?: continue
+                                    val type = stream.optString("Type", "")
+                                    if (type.equals("Video", ignoreCase = true) && resStr.isBlank()) {
+                                        val height = stream.optInt("Height", 0)
+                                        val width = stream.optInt("Width", 0)
+                                        vCodec = stream.optString("Codec", "").uppercase()
+                                        val videoRange = stream.optString("VideoRange", "")
+                                        resStr = when {
+                                            height >= 2000 || width >= 3800 -> "4K"
+                                            height >= 1000 || width >= 1900 -> "1080p"
+                                            height >= 700 || width >= 1200 -> "720p"
+                                            else -> if (height > 0) "${height}p" else ""
+                                        }
+                                        if (videoRange.isNotBlank() && videoRange != "SDR") {
+                                            resStr = if (resStr.isNotBlank()) "$resStr $videoRange" else videoRange
+                                        }
+                                    } else if (type.equals("Audio", ignoreCase = true) && aCodec.isBlank()) {
+                                        val rawCodec = stream.optString("Codec", "").uppercase()
+                                        val channels = when (stream.optInt("Channels", 0)) {
+                                            8 -> "7.1"
+                                            6 -> "5.1"
+                                            2 -> "2.0"
+                                            else -> ""
+                                        }
+                                        aCodec = if (rawCodec.isNotBlank()) {
+                                            if (channels.isNotBlank()) "$rawCodec $channels" else rawCodec
+                                        } else {
+                                            stream.optString("DisplayTitle", "").take(10)
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (srcName.isBlank() || srcName.equals("File", ignoreCase = true)) {
+                                srcName = listOf(resStr, vCodec, container.uppercase()).filter { it.isNotBlank() }.joinToString(" • ")
+                                if (srcName.isBlank()) srcName = "Version ${i + 1}"
+                            }
+
+                            versions.add(
+                                MediaVersion(
+                                    id = srcId,
+                                    name = srcName,
+                                    container = container,
+                                    resolution = resStr,
+                                    videoCodec = vCodec,
+                                    audioCodec = aCodec,
+                                    sizeBytes = size,
+                                    bitrate = bitrate
+                                )
+                            )
+                        }
+                    }
+
+                    val localTrailerCount = obj.optInt("LocalTrailerCount", 0)
+                    if (localTrailerCount > 0) {
+                        val trailersRaw = httpGet("$server/Users/$userId/Items/$jfId/LocalTrailers", token)
+                        if (trailersRaw != null) {
+                            val trailersArr = JSONArray(trailersRaw)
+                            if (trailersArr.length() > 0) {
+                                val tObj = trailersArr.optJSONObject(0)
+                                val tId = tObj?.optString("Id", "") ?: ""
+                                if (tId.isNotBlank()) {
+                                    isLocalTrailer = true
+                                    trailerUrl = "$server/Videos/$tId/stream?static=true&api_key=$token&userId=$userId"
+                                    trailerName = tObj?.optString("Name", "Bande-annonce") ?: "Bande-annonce"
+                                }
+                            }
+                        }
+                    }
+
+                    if (trailerUrl.isBlank()) {
+                        val remoteTrailers = obj.optJSONArray("RemoteTrailers")
+                        if (remoteTrailers != null && remoteTrailers.length() > 0) {
+                            val rObj = remoteTrailers.optJSONObject(0)
+                            trailerUrl = rObj?.optString("Url", "") ?: ""
+                            trailerName = rObj?.optString("Name", "Bande-annonce") ?: "Bande-annonce"
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        if (trailerUrl.isBlank() && movieItem.tmdbId != null) {
+            val tmdbTrailer = TmdbRepository.fetchMovieTrailer(movieItem.tmdbId)
+            if (tmdbTrailer != null) {
+                trailerUrl = tmdbTrailer.first
+                trailerName = tmdbTrailer.second
+            }
+        }
+
+        val defaultVerId = versions.firstOrNull()?.id ?: ""
+        MovieDetails(
+            movieItem = movieItem,
+            tagline = tagline,
+            genres = genres,
+            versions = versions,
+            selectedVersionId = defaultVerId,
+            trailerUrl = trailerUrl,
+            trailerName = trailerName.ifBlank { "Bande-annonce" },
+            isLocalTrailer = isLocalTrailer
+        )
     }
 
     suspend fun preparePlayback(config: JellyfinConfig, itemId: String): Boolean = withContext(Dispatchers.IO) {
