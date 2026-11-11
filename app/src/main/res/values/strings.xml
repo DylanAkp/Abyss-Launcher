@@ -28,6 +28,12 @@
     <string name="cta_pin_to_watchlist">Add to Watchlist</string>
     <string name="cta_pinned_in_watchlist">In Watchlist</string>
     <string name="cta_request_on_seer">Request on Seer</string>
+    <string name="cta_trailer">Trailer</string>
+    <string name="toast_trailer_unavailable">Trailer unavailable</string>
+    <string name="movie_version_label">Version: %1$s</string>
+    <string name="movie_versions_title">Available Versions</string>
+    <string name="movie_version_count">%1$d versions</string>
+    <string name="movie_long_press_hint">Hold Play to change version</string>
 
     <!-- Home & Category Rows -->
     <string name="row_continue_watching">Continue Watching</string>
