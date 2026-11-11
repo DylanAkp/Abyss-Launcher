@@ -81,6 +81,7 @@ import dev.dylanakp.abysstvlauncher.ui.components.HeroBackdropArtwork
 import dev.dylanakp.abysstvlauncher.ui.components.HeroSpotlightContent
 import dev.dylanakp.abysstvlauncher.ui.components.MediaDetailModal
 import dev.dylanakp.abysstvlauncher.ui.components.MediaRow
+import dev.dylanakp.abysstvlauncher.ui.components.MovieDetailScreen
 import dev.dylanakp.abysstvlauncher.ui.components.SeriesDetailScreen
 import dev.dylanakp.abysstvlauncher.ui.components.SettingsDrawer
 import dev.dylanakp.abysstvlauncher.ui.player.AbyssPlayerScreen
@@ -160,6 +161,28 @@ fun MainScreen(
             onLaunchExternalFallback = { streamUrl, title ->
                 val tempItem = activeSession.mediaItem.copy(streamUrl = streamUrl, title = title, localizedTitle = title)
                 SystemAppHelper.playMediaExternal(context, tempItem, PlayerPreference.EXTERNAL_PLAYER)
+            }
+        )
+        return
+    }
+
+    // Movie Detail Screen
+    val selectedMovie = state.selectedMovieForDetails
+    if (selectedMovie != null) {
+        MovieDetailScreen(
+            movieItem = selectedMovie,
+            movieDetails = state.activeMovieDetails,
+            isLoading = state.isLoadingMovieDetails,
+            playbackHistory = state.playbackHistory,
+            onBack = { viewModel.closeMovieDetails() },
+            onPlayMovie = { item, versionId ->
+                viewModel.playMovie(context, item, versionId)
+            },
+            onPlayTrailer = { trailerUrl ->
+                viewModel.playTrailer(context, trailerUrl, selectedMovie.title())
+            },
+            onSelectVersion = { versionId ->
+                viewModel.selectMovieVersion(versionId)
             }
         )
         return
