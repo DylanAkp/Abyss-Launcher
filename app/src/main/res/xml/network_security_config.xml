@@ -1,13 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Restrict cleartext traffic strictly to local private subnets for Jellyfin / Seer home servers -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">10.in-addr.arpa</domain>
-        <domain includeSubdomains="true">168.192.in-addr.arpa</domain>
-        <domain includeSubdomains="true">local</domain>
-        <domain includeSubdomains="true">localhost</domain>
-    </domain-config>
-    <base-config cleartextTrafficPermitted="false">
+    <!-- Permit cleartext traffic for local home servers (Jellyfin/Seer on LAN) -->
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

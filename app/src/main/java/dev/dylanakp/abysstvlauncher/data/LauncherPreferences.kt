@@ -24,10 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import java.io.IOException
 
 val Context.launcherDataStore: DataStore<Preferences> by preferencesDataStore(
@@ -41,7 +38,7 @@ class LauncherPreferences(private val context: Context) {
 
     private val dataStore = context.applicationContext.launcherDataStore
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val memoryCache = java.util.concurrent.ConcurrentHashMap<String, Any>()
+    private val memoryPrefs = java.util.concurrent.atomic.AtomicReference<Preferences>(emptyPreferences())
 
     val dataFlow: Flow<Preferences> = dataStore.data
         .catch { exception ->
@@ -53,26 +50,58 @@ class LauncherPreferences(private val context: Context) {
         }
 
     init {
+        val legacyPrefs = context.applicationContext.getSharedPreferences("abyss_tv_prefs", Context.MODE_PRIVATE)
+        val initialMap = mutableMapOf<Preferences.Key<*>, Any>()
+        legacyPrefs.getString("language", null)?.let { initialMap[KEY_LANGUAGE] = it }
+        legacyPrefs.getString("accent_preset", null)?.let { initialMap[KEY_ACCENT_PRESET] = it }
+        if (legacyPrefs.contains("auto_rotate_hero")) initialMap[KEY_AUTO_ROTATE_HERO] = legacyPrefs.getBoolean("auto_rotate_hero", true)
+        if (legacyPrefs.contains("show_hidden_apps")) initialMap[KEY_SHOW_HIDDEN_APPS] = legacyPrefs.getBoolean("show_hidden_apps", false)
+        legacyPrefs.getString("jf_server", null)?.let { initialMap[KEY_JF_SERVER] = it }
+        legacyPrefs.getString("jf_user", null)?.let { initialMap[KEY_JF_USER] = it }
+        legacyPrefs.getString("jf_pass", null)?.let { initialMap[KEY_JF_PASS] = it }
+        legacyPrefs.getString("jf_user_id", null)?.let { initialMap[KEY_JF_USER_ID] = it }
+        legacyPrefs.getString("jf_token", null)?.let { initialMap[KEY_JF_TOKEN] = it }
+        legacyPrefs.getString("jf_server_name", null)?.let { initialMap[KEY_JF_SERVER_NAME] = it }
+        legacyPrefs.getString("jf_player_pref", null)?.let { initialMap[KEY_JF_PLAYER_PREF] = it }
+        if (legacyPrefs.contains("jf_last_sync")) initialMap[KEY_JF_LAST_SYNC] = legacyPrefs.getLong("jf_last_sync", 0L)
+        if (legacyPrefs.contains("jf_movies_count")) initialMap[KEY_JF_MOVIES_COUNT] = legacyPrefs.getInt("jf_movies_count", 0)
+        if (legacyPrefs.contains("jf_series_count")) initialMap[KEY_JF_SERIES_COUNT] = legacyPrefs.getInt("jf_series_count", 0)
+        legacyPrefs.getString("seer_server", null)?.let { initialMap[KEY_SEER_SERVER] = it }
+        legacyPrefs.getString("seer_key", null)?.let { initialMap[KEY_SEER_KEY] = it }
+        if (legacyPrefs.contains("seer_last_sync")) initialMap[KEY_SEER_LAST_SYNC] = legacyPrefs.getLong("seer_last_sync", 0L)
+        if (legacyPrefs.contains("seer_req_count")) initialMap[KEY_SEER_REQ_COUNT] = legacyPrefs.getInt("seer_req_count", 0)
+        legacyPrefs.getString("pinned_packages", null)?.let { initialMap[KEY_PINNED_PACKAGES] = it }
+        legacyPrefs.getStringSet("hidden_packages", null)?.let { initialMap[KEY_HIDDEN_PACKAGES] = it }
+        legacyPrefs.getStringSet("watchlist_ids", null)?.let { initialMap[KEY_WATCHLIST_IDS] = it }
+        legacyPrefs.getString("weather_city", null)?.let { initialMap[KEY_WEATHER_CITY] = it }
+        legacyPrefs.getString("temp_unit", null)?.let { initialMap[KEY_TEMP_UNIT] = it }
+        legacyPrefs.getString("search_history", null)?.let { initialMap[KEY_SEARCH_HISTORY] = it }
+
+        if (initialMap.isNotEmpty()) {
+            memoryPrefs.set(androidx.datastore.preferences.core.emptyPreferences().toPreferences().let {
+                val mut = it.toMutablePreferences()
+                initialMap.forEach { (k, v) ->
+                    @Suppress("UNCHECKED_CAST")
+                    mut[k as Preferences.Key<Any>] = v
+                }
+                mut.toPreferences()
+            })
+        }
+
         scope.launch {
             dataFlow.collect { prefs ->
-                prefs[KEY_LANGUAGE]?.let { memoryCache["language"] = it }
-                prefs[KEY_ACCENT_PRESET]?.let { memoryCache["accentPreset"] = it }
-                prefs[KEY_AUTO_ROTATE_HERO]?.let { memoryCache["autoRotateHero"] = it }
-                prefs[KEY_SHOW_HIDDEN_APPS]?.let { memoryCache["showHiddenApps"] = it }
-                prefs[KEY_WEATHER_CITY]?.let { memoryCache["weatherCity"] = it }
-                prefs[KEY_TEMP_UNIT]?.let { memoryCache["temperatureUnit"] = it }
+                memoryPrefs.set(prefs)
             }
         }
     }
 
-    private fun <T> read(block: (Preferences) -> T): T {
-        val current = scope.runCatching {
-            kotlinx.coroutines.runBlocking(Dispatchers.IO) { block(dataFlow.first()) }
-        }.getOrNull()
-        return current ?: block(emptyPreferences())
+    private inline fun <T> read(crossinline block: (Preferences) -> T): T {
+        return block(memoryPrefs.get())
     }
 
     private fun mutate(block: (MutablePreferences: androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
+        val updated = memoryPrefs.get().toMutablePreferences().apply(block).toPreferences()
+        memoryPrefs.set(updated)
         scope.launch {
             dataStore.edit { block(it) }
         }
