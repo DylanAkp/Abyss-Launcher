@@ -484,12 +484,13 @@ fun SeriesDetailScreen(
                         focusRequester = if (idx == 0) firstEpisodeRequester else null,
                         onNavigateUp = if (idx == 0) {
                             {
-                                coroutineScope.launch {
-                                    pageListState.animateScrollToItem(0)
-                                    try {
-                                        if (seasons.size > 1) firstSeasonTabRequester.requestFocus()
-                                        else continueButtonRequester.requestFocus()
-                                    } catch (_: Exception) {}
+                                if (seasons.size > 1) {
+                                    try { firstSeasonTabRequester.requestFocus() } catch (_: Exception) {}
+                                } else {
+                                    coroutineScope.launch {
+                                        pageListState.animateScrollToItem(0)
+                                        try { continueButtonRequester.requestFocus() } catch (_: Exception) {}
+                                    }
                                 }
                             }
                         } else null,
