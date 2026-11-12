@@ -33,16 +33,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -63,6 +66,7 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.theme.AbyssVoid
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun AbyssSearchScreen(
@@ -87,16 +91,14 @@ fun AbyssSearchScreen(
     modifier: Modifier = Modifier
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val coroutineScope = rememberCoroutineScope()
     val firstResultFocusRequester = remember { FocusRequester() }
     val clearButtonFocusRequester = remember { FocusRequester() }
     val searchResultsListState = rememberLazyListState()
     var isInputFocused by remember { mutableStateOf(false) }
 
-    LaunchedEffect(query) {
-        if (searchResultsListState.firstVisibleItemIndex > 0 || searchResultsListState.firstVisibleItemScrollOffset > 0) {
-            searchResultsListState.scrollToItem(0, 0)
-        }
-    }
+    val trimmedQuery = query.trim()
 
     // Focus the search field and summon the integrated TV keyboard on entry
     LaunchedEffect(Unit) {
@@ -107,7 +109,9 @@ fun AbyssSearchScreen(
         } catch (_: Exception) {}
     }
 
-    val trimmedQuery = query.trim()
+    LaunchedEffect(trimmedQuery, searchResults) {
+        searchResultsListState.scrollToItem(0, 0)
+    }
 
     val matchedMovies = remember(searchResults, trimmedQuery) {
         if (trimmedQuery.isBlank()) emptyList()
@@ -213,12 +217,38 @@ fun AbyssSearchScreen(
                             onSearch = {
                                 keyboardController?.hide()
                                 if (query.isNotBlank()) onSubmitQuery(query)
-                                try { firstResultFocusRequester.requestFocus() } catch (_: Exception) {}
+                                coroutineScope.launch {
+                                    if (trimmedQuery.isNotBlank()) {
+                                        searchResultsListState.scrollToItem(0, 0)
+                                    }
+                                    val requested = try {
+                                        firstResultFocusRequester.requestFocus()
+                                        true
+                                    } catch (_: Exception) {
+                                        false
+                                    }
+                                    if (!requested) {
+                                        focusManager.moveFocus(FocusDirection.Down)
+                                    }
+                                }
                             },
                             onDone = {
                                 keyboardController?.hide()
                                 if (query.isNotBlank()) onSubmitQuery(query)
-                                try { firstResultFocusRequester.requestFocus() } catch (_: Exception) {}
+                                coroutineScope.launch {
+                                    if (trimmedQuery.isNotBlank()) {
+                                        searchResultsListState.scrollToItem(0, 0)
+                                    }
+                                    val requested = try {
+                                        firstResultFocusRequester.requestFocus()
+                                        true
+                                    } catch (_: Exception) {
+                                        false
+                                    }
+                                    if (!requested) {
+                                        focusManager.moveFocus(FocusDirection.Down)
+                                    }
+                                }
                             }
                         ),
                         modifier = Modifier
@@ -240,12 +270,21 @@ fun AbyssSearchScreen(
                                         }
                                         KeyEvent.KEYCODE_DPAD_DOWN -> {
                                             keyboardController?.hide()
-                                            try {
-                                                firstResultFocusRequester.requestFocus()
-                                                true
-                                            } catch (_: Exception) {
-                                                false
+                                            coroutineScope.launch {
+                                                if (trimmedQuery.isNotBlank()) {
+                                                    searchResultsListState.scrollToItem(0, 0)
+                                                }
+                                                val requested = try {
+                                                    firstResultFocusRequester.requestFocus()
+                                                    true
+                                                } catch (_: Exception) {
+                                                    false
+                                                }
+                                                if (!requested) {
+                                                    focusManager.moveFocus(FocusDirection.Down)
+                                                }
                                             }
+                                            true
                                         }
                                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                             if (query.isNotEmpty()) {
@@ -305,12 +344,21 @@ fun AbyssSearchScreen(
                                         }
                                     }
                                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                        try {
-                                            firstResultFocusRequester.requestFocus()
-                                            true
-                                        } catch (_: Exception) {
-                                            false
+                                        coroutineScope.launch {
+                                            if (trimmedQuery.isNotBlank()) {
+                                                searchResultsListState.scrollToItem(0, 0)
+                                            }
+                                            val requested = try {
+                                                firstResultFocusRequester.requestFocus()
+                                                true
+                                            } catch (_: Exception) {
+                                                false
+                                            }
+                                            if (!requested) {
+                                                focusManager.moveFocus(FocusDirection.Down)
+                                            }
                                         }
+                                        true
                                     }
                                     else -> false
                                 }
@@ -363,7 +411,7 @@ fun AbyssSearchScreen(
             if (trimmedQuery.isBlank()) {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 36.dp),
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 36.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     if (searchHistory.isNotEmpty()) {
@@ -517,7 +565,7 @@ fun AbyssSearchScreen(
                 LazyColumn(
                     state = searchResultsListState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 36.dp),
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 36.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     if (matchedMovies.isNotEmpty()) {
