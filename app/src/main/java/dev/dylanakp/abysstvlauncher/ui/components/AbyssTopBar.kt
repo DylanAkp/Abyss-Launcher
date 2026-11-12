@@ -41,7 +41,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dylanakp.abysstvlauncher.R
+import dev.dylanakp.abysstvlauncher.data.WeatherInfo
 import dev.dylanakp.abysstvlauncher.model.AbyssNavTab
+import dev.dylanakp.abysstvlauncher.model.TemperatureUnit
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import kotlinx.coroutines.delay
@@ -64,6 +66,8 @@ fun AbyssTopBar(
     onOpenAndroidSettings: () -> Unit,
     onOpenLauncherSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    weatherInfo: WeatherInfo? = null,
+    temperatureUnit: TemperatureUnit = TemperatureUnit.CELSIUS,
     weatherText: String? = null,
     isSearchActive: Boolean = false,
     activeTabRequester: FocusRequester? = null,
@@ -183,7 +187,33 @@ fun AbyssTopBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (!weatherText.isNullOrBlank()) {
+            if (weatherInfo != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    WeatherIcon(
+                        type = weatherInfo.weatherIconType,
+                        color = Color.White,
+                        size = 15.dp
+                    )
+                    Text(
+                        text = weatherInfo.formatTemperature(temperatureUnit),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp
+                        ),
+                        color = Color.White
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(3.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x80FFFFFF))
+                )
+            } else if (!weatherText.isNullOrBlank()) {
                 Text(
                     text = weatherText,
                     style = MaterialTheme.typography.bodyMedium.copy(

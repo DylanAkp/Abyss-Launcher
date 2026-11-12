@@ -16,19 +16,48 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
+enum class WeatherIconType {
+    SUNNY,
+    CLEAR_NIGHT,
+    PARTLY_CLOUDY_DAY,
+    PARTLY_CLOUDY_NIGHT,
+    CLOUDY,
+    FOG,
+    RAIN,
+    SNOW,
+    THUNDERSTORM
+}
+
 data class WeatherInfo(
     val temperatureC: Double,
     val weatherCode: Int,
-    val iconEmoji: String,
-    val cityName: String
+    val isDay: Boolean = true,
+    val iconEmoji: String = "",
+    val cityName: String = ""
 ) {
-    fun displayString(unit: TemperatureUnit): String {
+    val weatherIconType: WeatherIconType
+        get() = when (weatherCode) {
+            0 -> if (isDay) WeatherIconType.SUNNY else WeatherIconType.CLEAR_NIGHT
+            1, 2 -> if (isDay) WeatherIconType.PARTLY_CLOUDY_DAY else WeatherIconType.PARTLY_CLOUDY_NIGHT
+            3 -> WeatherIconType.CLOUDY
+            45, 48 -> WeatherIconType.FOG
+            51, 53, 55, 61, 63, 65, 80, 81, 82 -> WeatherIconType.RAIN
+            71, 73, 75, 77, 85, 86 -> WeatherIconType.SNOW
+            95, 96, 99 -> WeatherIconType.THUNDERSTORM
+            else -> if (isDay) WeatherIconType.SUNNY else WeatherIconType.CLEAR_NIGHT
+        }
+
+    fun formatTemperature(unit: TemperatureUnit): String {
         val temp = if (unit == TemperatureUnit.FAHRENHEIT) {
             (temperatureC * 9.0 / 5.0 + 32.0).roundToInt()
         } else {
             temperatureC.roundToInt()
         }
-        return "$iconEmoji  $temp${unit.symbol}"
+        return "$temp${unit.symbol}"
+    }
+
+    fun displayString(unit: TemperatureUnit): String {
+        return formatTemperature(unit)
     }
 }
 
@@ -52,7 +81,8 @@ private data class WeatherResponse(
 @Serializable
 private data class CurrentWeather(
     @SerialName("temperature_2m") val temperature2m: Double = 0.0,
-    @SerialName("weather_code") val weatherCode: Int = 0
+    @SerialName("weather_code") val weatherCode: Int = 0,
+    @SerialName("is_day") val isDay: Int = 1
 )
 
 object WeatherRepository : IWeatherRepository, KoinComponent {
@@ -89,7 +119,7 @@ object WeatherRepository : IWeatherRepository, KoinComponent {
             val geoData = json.decodeFromString<GeocodingResponse>(geoBody)
             val first = geoData.results.firstOrNull() ?: return@withContext cachedInfo
 
-            val weatherUrl = "https://api.open-meteo.com/v1/forecast?latitude=${first.latitude}&longitude=${first.longitude}&current=temperature_2m,weather_code"
+            val weatherUrl = "https://api.open-meteo.com/v1/forecast?latitude=${first.latitude}&longitude=${first.longitude}&current=temperature_2m,weather_code,is_day"
             val weatherReq = Request.Builder()
                 .url(weatherUrl)
                 .header("User-Agent", "AbyssLauncher/2.0")
@@ -103,6 +133,7 @@ object WeatherRepository : IWeatherRepository, KoinComponent {
             val info = WeatherInfo(
                 temperatureC = current.temperature2m,
                 weatherCode = current.weatherCode,
+                isDay = current.isDay == 1,
                 iconEmoji = weatherCodeToEmoji(current.weatherCode),
                 cityName = first.name.ifBlank { cityName }
             )

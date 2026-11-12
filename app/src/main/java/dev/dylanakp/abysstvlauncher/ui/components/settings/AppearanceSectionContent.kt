@@ -2,6 +2,7 @@ package dev.dylanakp.abysstvlauncher.ui.components.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -26,6 +28,7 @@ import dev.dylanakp.abysstvlauncher.data.WeatherInfo
 import dev.dylanakp.abysstvlauncher.model.AppLanguage
 import dev.dylanakp.abysstvlauncher.model.TemperatureUnit
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
+import dev.dylanakp.abysstvlauncher.ui.components.WeatherIcon
 
 @Composable
 fun AppearanceSectionContent(
@@ -80,11 +83,23 @@ fun AppearanceSectionContent(
             var inputCity by remember(weatherCity) { mutableStateOf(weatherCity) }
             val currentPreview = weatherInfo?.let { "${it.cityName} : ${it.displayString(temperatureUnit)}" } ?: "$weatherCity"
 
-            Text(
-                text = stringResource(R.string.weather_preview_format, currentPreview),
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                color = Color(0xFFBDC1C6)
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (weatherInfo != null) {
+                    WeatherIcon(
+                        type = weatherInfo.weatherIconType,
+                        color = Color.White,
+                        size = 14.dp
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.weather_preview_format, currentPreview),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = Color(0xFFBDC1C6)
+                )
+            }
 
             SettingsGlassInputField(
                 label = stringResource(R.string.weather_city_label),
