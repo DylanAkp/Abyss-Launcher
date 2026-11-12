@@ -1,10 +1,16 @@
 package dev.dylanakp.abysstvlauncher.player
 
 import android.content.Context
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem as ExoMediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
@@ -13,6 +19,9 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import dev.dylanakp.abysstvlauncher.R
@@ -81,6 +90,62 @@ class PlayerManagerImpl(
     private val _state = MutableStateFlow(PlayerPlaybackState())
     override val state: StateFlow<PlayerPlaybackState> = _state.asStateFlow()
 
+    private fun isBluetoothOrHeadsetConnected(): Boolean {
+        val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+        val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        return devices.any { device ->
+            when (device.type) {
+                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                AudioDeviceInfo.TYPE_USB_HEADSET -> true
+                else -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        device.type == AudioDeviceInfo.TYPE_BLE_BROADCAST
+                    ) {
+                        true
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        (device.type == AudioDeviceInfo.TYPE_BLE_HEADSET || device.type == AudioDeviceInfo.TYPE_BLE_SPEAKER)
+                    ) {
+                        true
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                        device.type == AudioDeviceInfo.TYPE_HEARING_AID
+                    ) {
+                        true
+                    } else false
+                }
+            }
+        }
+    }
+
+    init {
+        val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        audioManager?.registerAudioDeviceCallback(object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                updateAudioRouting()
+            }
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                updateAudioRouting()
+            }
+        }, null)
+    }
+
+    private fun updateAudioRouting() {
+        val isHeadset = isBluetoothOrHeadsetConnected()
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .apply {
+                if (isHeadset) {
+                    setMaxAudioChannelCount(2)
+                } else {
+                    setMaxAudioChannelCount(Int.MAX_VALUE)
+                }
+            }
+            .build()
+    }
+
     override val player: ExoPlayer by lazy {
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent("AbyssTVLauncher/1.0.0 (Android TV; Jellyfin)")
@@ -88,8 +153,33 @@ class PlayerManagerImpl(
             .setConnectTimeoutMs(12_000)
             .setReadTimeoutMs(20_000)
 
-        val renderersFactory = DefaultRenderersFactory(appContext)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+        val renderersFactory = object : DefaultRenderersFactory(appContext) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean
+            ): AudioSink? {
+                val sink = DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    .build()
+                return object : ForwardingAudioSink(sink) {
+                    override fun getFormatSupport(format: Format): Int {
+                        if (isBluetoothOrHeadsetConnected() && format.sampleMimeType != MimeTypes.AUDIO_RAW) {
+                            return AudioSink.SINK_FORMAT_UNSUPPORTED
+                        }
+                        return super.getFormatSupport(format)
+                    }
+
+                    override fun supportsFormat(format: Format): Boolean {
+                        if (isBluetoothOrHeadsetConnected() && format.sampleMimeType != MimeTypes.AUDIO_RAW) {
+                            return false
+                        }
+                        return super.supportsFormat(format)
+                    }
+                }
+            }
+        }.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
             .setEnableDecoderFallback(true)
 
         val loadControl = DefaultLoadControl.Builder()
@@ -190,10 +280,18 @@ class PlayerManagerImpl(
             )
         }
 
+        val isHeadset = isBluetoothOrHeadsetConnected()
         player.trackSelectionParameters = player.trackSelectionParameters
             .buildUpon()
             .clearOverridesOfType(C.TRACK_TYPE_TEXT)
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .apply {
+                if (isHeadset) {
+                    setMaxAudioChannelCount(2)
+                } else {
+                    setMaxAudioChannelCount(Int.MAX_VALUE)
+                }
+            }
             .build()
 
         val item = ExoMediaItem.fromUri(session.streamUrl)
@@ -285,6 +383,11 @@ class PlayerManagerImpl(
         stopProgressPolling()
         player.stop()
         player.clearMediaItems()
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .build()
         _state.update { PlayerPlaybackState() }
     }
 
