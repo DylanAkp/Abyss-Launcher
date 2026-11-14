@@ -1,17 +1,16 @@
 package dev.dylanakp.abysstvlauncher.ui.components
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,8 +38,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -253,30 +253,65 @@ fun MovieDetailScreen(
 
                 Spacer(modifier = Modifier.height(2.dp))
 
-                // Action Buttons Row: Play/Resume (Long click for version) & Trailer
+                // Action Buttons Row: Play/Resume (Split button for version) & Trailer
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 1. Play / Resume Button (Long-press to pick version if multiple exist)
                     val playLabel = if (hasSavedPos) {
                         stringResource(R.string.series_resume_at, resumeTimeStr)
                     } else {
                         stringResource(R.string.cta_play_stream)
                     }
 
-                    MovieActionButton(
-                        label = playLabel,
-                        icon = AbyssIconType.PLAY,
-                        isPrimary = true,
-                        focusRequester = playButtonRequester,
-                        onClick = {
-                            onPlayMovie(movieItem, selectedVersion?.id)
-                        },
-                        onLongClick = if (versions.size > 1) {
-                            { showVersionMenu = true }
-                        } else null
-                    )
+                    if (versions.size > 1) {
+                        Row(
+                            modifier = Modifier.height(IntrinsicSize.Max),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            MovieActionButton(
+                                label = playLabel,
+                                icon = AbyssIconType.PLAY,
+                                isPrimary = true,
+                                focusRequester = playButtonRequester,
+                                shape = RoundedCornerShape(
+                                    topStart = 24.dp,
+                                    bottomStart = 24.dp,
+                                    topEnd = 0.dp,
+                                    bottomEnd = 0.dp
+                                ),
+                                modifier = Modifier.fillMaxHeight(),
+                                onClick = {
+                                    onPlayMovie(movieItem, selectedVersion?.id)
+                                }
+                            )
+                            MovieActionButton(
+                                label = null,
+                                icon = AbyssIconType.CHEVRON_DOWN,
+                                isPrimary = true,
+                                shape = RoundedCornerShape(
+                                    topStart = 0.dp,
+                                    bottomStart = 0.dp,
+                                    topEnd = 24.dp,
+                                    bottomEnd = 24.dp
+                                ),
+                                horizontalPadding = 14.dp,
+                                modifier = Modifier.fillMaxHeight(),
+                                onClick = { showVersionMenu = true }
+                            )
+                        }
+                    } else {
+                        MovieActionButton(
+                            label = playLabel,
+                            icon = AbyssIconType.PLAY,
+                            isPrimary = true,
+                            focusRequester = playButtonRequester,
+                            onClick = {
+                                onPlayMovie(movieItem, selectedVersion?.id)
+                            }
+                        )
+                    }
 
                     // 2. Play Trailer Button (Concise label, strictly R.string.cta_trailer)
                     if (movieDetails?.trailerUrl?.isNotBlank() == true) {
@@ -289,16 +324,6 @@ fun MovieDetailScreen(
                             }
                         )
                     }
-                }
-
-                // Hint for multiple versions
-                if (versions.size > 1) {
-                    Text(
-                        text = stringResource(R.string.movie_long_press_hint),
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                        color = AbyssTextSecondary.copy(alpha = 0.65f),
-                        maxLines = 1
-                    )
                 }
 
                 // Synopsis
@@ -317,7 +342,7 @@ fun MovieDetailScreen(
             }
         }
 
-        // 3. VERSION PICKER MODAL (Triggered by long-press on Play button)
+        // 3. VERSION PICKER MODAL
         if (showVersionMenu && versions.size > 1) {
             Box(
                 modifier = Modifier
@@ -486,18 +511,18 @@ private fun VersionSelectionCard(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MovieActionButton(
-    label: String,
+    label: String?,
     icon: AbyssIconType,
     isPrimary: Boolean,
+    modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
-    onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null
+    shape: Shape = RoundedCornerShape(50),
+    horizontalPadding: Dp = 22.dp,
+    onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    var longPressConsumed by remember { mutableStateOf(false) }
 
     val (bgColor, textColor) = when {
         isFocused -> Pair(Color.White, Color.Black)
@@ -506,45 +531,14 @@ private fun MovieActionButton(
     }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .scale(if (isFocused) 1.05f else 1f)
-            .clip(RoundedCornerShape(50))
+            .clip(shape)
             .background(bgColor)
             .onFocusChanged { isFocused = it.isFocused }
-            .onPreviewKeyEvent { keyEvent ->
-                if (onLongClick == null) return@onPreviewKeyEvent false
-                val native = keyEvent.nativeKeyEvent
-                val isSelectKey = native.keyCode in listOf(
-                    android.view.KeyEvent.KEYCODE_DPAD_CENTER,
-                    android.view.KeyEvent.KEYCODE_ENTER,
-                    android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
-                )
-                if (isSelectKey && native.action == android.view.KeyEvent.ACTION_DOWN) {
-                    if (native.repeatCount > 0) {
-                        if (!longPressConsumed) {
-                            longPressConsumed = true
-                            onLongClick()
-                        }
-                        true
-                    } else {
-                        longPressConsumed = false
-                        false
-                    }
-                } else if (isSelectKey && native.action == android.view.KeyEvent.ACTION_UP) {
-                    if (longPressConsumed) {
-                        longPressConsumed = false
-                        true
-                    } else false
-                } else false
-            }
-            .combinedClickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
-            .padding(horizontal = 22.dp, vertical = 11.dp),
+            .clickable { onClick() }
+            .padding(horizontal = horizontalPadding, vertical = 11.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
@@ -556,16 +550,18 @@ private fun MovieActionButton(
                 color = textColor,
                 size = 14.dp
             )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
-                ),
-                color = textColor,
-                maxLines = 1,
-                softWrap = false
-            )
+            if (label != null) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    ),
+                    color = textColor,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
         }
     }
 }

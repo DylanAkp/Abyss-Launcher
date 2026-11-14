@@ -48,6 +48,7 @@ enum class AbyssIconType {
     EYE_OFF,
     ARROW_LEFT,
     ARROW_RIGHT,
+    CHEVRON_DOWN,
     INFO,
     WIFI,
     BLUETOOTH,
@@ -152,6 +153,7 @@ fun AbyssIcon(
             AbyssIconType.EYE_OFF -> drawEye(w, h, color, stroke, crossed = true)
             AbyssIconType.ARROW_LEFT -> drawArrowHorizontal(w, h, color, stroke, left = true)
             AbyssIconType.ARROW_RIGHT -> drawArrowHorizontal(w, h, color, stroke, left = false)
+            AbyssIconType.CHEVRON_DOWN -> drawChevronDown(w, h, color, stroke)
             AbyssIconType.INFO -> drawInfo(w, h, color, stroke)
             AbyssIconType.WIFI -> drawWifi(w, h, color, stroke)
             AbyssIconType.BLUETOOTH -> drawBluetooth(w, h, color, stroke)
@@ -515,6 +517,15 @@ private fun DrawScope.drawArrowHorizontal(w: Float, h: Float, color: Color, stro
         }
     }
     drawPath(head, color = color, style = stroke)
+}
+
+private fun DrawScope.drawChevronDown(w: Float, h: Float, color: Color, stroke: Stroke) {
+    val path = Path().apply {
+        moveTo(w * 0.22f, h * 0.36f)
+        lineTo(w * 0.50f, h * 0.66f)
+        lineTo(w * 0.78f, h * 0.36f)
+    }
+    drawPath(path, color = color, style = stroke)
 }
 
 private fun DrawScope.drawInfo(w: Float, h: Float, color: Color, stroke: Stroke) {
