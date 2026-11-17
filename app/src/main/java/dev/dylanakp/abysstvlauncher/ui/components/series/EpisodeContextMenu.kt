@@ -1,11 +1,12 @@
 package dev.dylanakp.abysstvlauncher.ui.components.series
 
 import android.view.KeyEvent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,19 +30,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
-import dev.dylanakp.abysstvlauncher.theme.AbyssSurfaceGlassElevated
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
@@ -58,24 +62,30 @@ fun EpisodeContextMenu(
     onMarkAllPreviousWatched: () -> Unit,
     onMarkAllFollowingUnwatched: () -> Unit
 ) {
-    AnimatedVisibility(
-        visible = episode != null,
-        enter = fadeIn(),
-        exit = fadeOut()
+    if (episode == null) return
+
+    val initialFocusRequester = remember { FocusRequester() }
+    var hasSeenFreshDown by remember(episode.id) { mutableStateOf(false) }
+
+    LaunchedEffect(episode.id) {
+        delay(60L)
+        try { initialFocusRequester.requestFocus() } catch (_: Exception) {}
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        if (episode == null) return@AnimatedVisibility
-        val initialFocusRequester = remember { FocusRequester() }
-        var hasSeenFreshDown by remember(episode.id) { mutableStateOf(false) }
-
-        LaunchedEffect(episode.id) {
-            delay(60L)
-            try { initialFocusRequester.requestFocus() } catch (_: Exception) {}
-        }
-
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0x99000000))
+                .background(Color(0xA6000000))
+                .focusProperties { canFocus = false }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss
+                )
                 .onPreviewKeyEvent { event ->
                     val native = event.nativeKeyEvent
                     val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
@@ -92,84 +102,93 @@ fun EpisodeContextMenu(
                                     !hasSeenFreshDown
                                 }
                             }
-                            KeyEvent.ACTION_UP -> {
-                                !hasSeenFreshDown
-                            }
+                            KeyEvent.ACTION_UP -> !hasSeenFreshDown
                             else -> false
                         }
-                    } else {
-                        false
-                    }
-                }
-                .clickable { onDismiss() },
+                    } else false
+                },
             contentAlignment = Alignment.Center
         ) {
-            Box(
+            Column(
                 modifier = Modifier
-                    .width(420.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(AbyssSurfaceGlassElevated)
-                    .clickable(enabled = false) {}
-                    .padding(22.dp)
+                    .width(440.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xFF191C24))
+                    .border(1.dp, Color(0x24FFFFFF), RoundedCornerShape(28.dp))
+                    .focusProperties { canFocus = false }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    )
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                val epCode = "S${episode.seasonNumber.toString().padStart(2, '0')}E${episode.episodeNumber.toString().padStart(2, '0')}"
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color(0x1FFFFFFF))
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = seriesItem.title(),
-                        style = MaterialTheme.typography.bodySmall.copy(
+                        text = "${seriesItem.title()} • $epCode",
+                        style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp,
+                            letterSpacing = 0.6.sp,
                             fontSize = 11.sp
                         ),
                         color = AbyssTextSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-
-                    val epCode = "S${episode.seasonNumber.toString().padStart(2, '0')}E${episode.episodeNumber.toString().padStart(2, '0')}"
-                    Text(
-                        text = if (episode.title.isNotBlank()) "$epCode — ${episode.title}" else epCode,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 17.sp
-                        ),
-                        color = AbyssTextPrimary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    val watchedLabel = if (isWatched) stringResource(R.string.episode_action_mark_unwatched) else stringResource(R.string.episode_action_mark_watched)
-                    EpisodeContextMenuItem(
-                        label = watchedLabel,
-                        icon = if (isWatched) AbyssIconType.CLOSE else AbyssIconType.CHECK,
-                        focusRequester = initialFocusRequester,
-                        onClick = onToggleSingleWatched
-                    )
-
-                    EpisodeContextMenuItem(
-                        label = stringResource(R.string.episode_action_mark_all_previous_watched),
-                        icon = AbyssIconType.CHECK,
-                        onClick = onMarkAllPreviousWatched
-                    )
-
-                    EpisodeContextMenuItem(
-                        label = stringResource(R.string.episode_action_mark_all_following_unwatched),
-                        icon = AbyssIconType.CLOSE,
-                        onClick = onMarkAllFollowingUnwatched
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    EpisodeContextMenuItem(
-                        label = stringResource(R.string.episode_action_cancel),
-                        icon = AbyssIconType.CLOSE,
-                        onClick = onDismiss
-                    )
                 }
+
+                Text(
+                    text = episode.title.ifBlank { epCode },
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 19.sp
+                    ),
+                    color = AbyssTextPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                val watchedLabel = if (isWatched) {
+                    stringResource(R.string.episode_action_mark_unwatched)
+                } else {
+                    stringResource(R.string.episode_action_mark_watched)
+                }
+                EpisodeContextMenuItem(
+                    label = watchedLabel,
+                    icon = if (isWatched) AbyssIconType.CLOSE else AbyssIconType.CHECK,
+                    focusRequester = initialFocusRequester,
+                    onClick = onToggleSingleWatched
+                )
+
+                EpisodeContextMenuItem(
+                    label = stringResource(R.string.episode_action_mark_all_previous_watched),
+                    icon = AbyssIconType.CHECK,
+                    onClick = onMarkAllPreviousWatched
+                )
+
+                EpisodeContextMenuItem(
+                    label = stringResource(R.string.episode_action_mark_all_following_unwatched),
+                    icon = AbyssIconType.CLOSE,
+                    onClick = onMarkAllFollowingUnwatched
+                )
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                EpisodeContextMenuItem(
+                    label = stringResource(R.string.episode_action_cancel),
+                    icon = AbyssIconType.CLOSE,
+                    isTonal = false,
+                    onClick = onDismiss
+                )
             }
         }
     }
@@ -179,25 +198,40 @@ fun EpisodeContextMenu(
 private fun EpisodeContextMenuItem(
     label: String,
     icon: AbyssIconType? = null,
+    isTonal: Boolean = true,
     focusRequester: FocusRequester? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    val contentColor = if (isFocused) Color.Black else AbyssTextPrimary
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.03f else 1f,
+        animationSpec = tween(110),
+        label = "epMenuScale"
+    )
+    val bgColor = when {
+        isFocused -> Color.White
+        isTonal -> Color(0xFF252A36)
+        else -> Color(0x12FFFFFF)
+    }
+    val contentColor = if (isFocused) Color(0xFF14171F) else AbyssTextPrimary
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (isFocused) Color.White else Color(0x14FFFFFF))
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(16.dp))
+            .background(bgColor)
             .onFocusChanged { isFocused = it.isFocused }
             .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 11.dp)
+            .padding(horizontal = 16.dp, vertical = 13.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (icon != null) {
                 AbyssIcon(
@@ -209,7 +243,7 @@ private fun EpisodeContextMenuItem(
             Text(
                 text = label,
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = if (isFocused) FontWeight.Bold else FontWeight.SemiBold,
                     fontSize = 14.sp
                 ),
                 color = contentColor,

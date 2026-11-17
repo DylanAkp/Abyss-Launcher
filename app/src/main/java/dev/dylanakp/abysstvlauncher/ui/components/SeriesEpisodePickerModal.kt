@@ -462,7 +462,12 @@ fun SeriesDetailScreen(
                                         }
                                     },
                                     onNavigateDown = {
-                                        try { firstEpisodeRequester.requestFocus() } catch (_: Exception) {}
+                                        coroutineScope.launch {
+                                            if (episodes.isNotEmpty()) {
+                                                pageListState.animateScrollToItem(2)
+                                                try { firstEpisodeRequester.requestFocus() } catch (_: Exception) {}
+                                            }
+                                        }
                                     },
                                     onClick = { selectedSeasonIndex = idx }
                                 )

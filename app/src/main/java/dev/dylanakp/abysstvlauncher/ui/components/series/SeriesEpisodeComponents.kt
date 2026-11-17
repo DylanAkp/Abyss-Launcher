@@ -370,14 +370,15 @@ fun SeriesActionPill(
     val bgColor by animateColorAsState(
         targetValue = when {
             isFocused -> Color.White
-            isPrimary -> Color(0xE6FFFFFF)
+            isPrimary -> Color(0x38FFFFFF)
             else -> AbyssPillGlass
         },
         animationSpec = tween(110),
         label = "seriesActionBg"
     )
     val contentColor = when {
-        isFocused || isPrimary -> Color.Black
+        isFocused -> Color(0xFF1E222B)
+        isPrimary -> Color.White
         else -> AbyssTextPrimary
     }
 
