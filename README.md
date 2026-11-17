@@ -14,6 +14,7 @@
 
 - **Modern TV Design**: Grouped container cards, ice-blue focus states, smooth D-pad navigation, and Google TV style sidebar drawer.
 - **NVIDIA Shield TV Shortcut**: Dedicated shortcut button to trigger the Shield Remote Locator directly from top navigation.
+- **Built-in Web Remote**: Self-hosted local web remote (port `5400`, mDNS `abyss-tv.local`) with QR code pairing in Settings, multi-phone support, Material 3 Expressive D-pad/touchpad, live Now Playing controls, app launcher, and Shield remote ring.
 - **Native Jellyfin Client**: Resume watchlist, Next Up episode tracking, instant ExoPlayer playback, and watch status sync.
 - **Jellyseerr / Overseerr Discovery**: Browse trending media, monitor active downloads, and send media requests directly from your TV.
 - **Built-in Media3 Player**: Full 10-foot player with audio and subtitle tracks selectors, plus rapid D-pad seek accumulation.

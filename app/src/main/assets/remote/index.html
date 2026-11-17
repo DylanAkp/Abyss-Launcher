@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0D1117" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="stylesheet" href="/style.css" />
+  <title>Abyss TV Remote</title>
+</head>
+<body>
+  <div id="pair-screen" class="screen hidden">
+    <div class="m3-pair-card">
+      <div class="m3-badge">ABYSS TV</div>
+      <h1>Pair Phone</h1>
+      <p>Settings → Web Remote PIN</p>
+      <input id="pin-input" type="tel" inputmode="numeric" maxlength="6" placeholder="••••••" autocomplete="off" />
+      <button id="pair-btn" class="m3-filled-btn">Connect</button>
+      <div id="pair-error" class="error-text"></div>
+    </div>
+  </div>
+
+  <div id="remote-screen" class="screen hidden">
+    <header class="m3-topbar">
+      <div class="m3-status-dot-wrap" title="Connection">
+        <span id="conn-dot" class="dot"></span>
+        <span id="conn-label" class="sr-only">Connecting</span>
+      </div>
+
+      <div class="m3-segmented" role="tablist">
+        <button class="seg-btn active" data-tab="dpad" aria-label="D-Pad">
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 13c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z"/></svg>
+        </button>
+        <button class="seg-btn" data-tab="touchpad" aria-label="Touchpad">
+          <svg viewBox="0 0 24 24"><path d="M9 11.24V7.5C9 6.12 10.12 5 11.5 5S14 6.12 14 7.5v3.74c1.21-.81 2-2.18 2-3.74C16 5.01 13.99 3 11.5 3S7 5.01 7 7.5c0 1.56.79 2.93 2 3.74zm9.84 4.63l-4.54-2.26c-.17-.07-.35-.11-.54-.11H13v-6c0-.83-.67-1.5-1.5-1.5S10 6.67 10 7.5v10.74l-3.43-.72c-.08-.01-.15-.03-.24-.03-.31 0-.59.13-.79.33l-.79.8 4.94 4.94c.27.27.65.44 1.06.44h6.79c.75 0 1.33-.55 1.44-1.28l.75-5.27c.01-.07.02-.14.02-.2 0-.62-.38-1.16-.91-1.38z"/></svg>
+        </button>
+        <button class="seg-btn" data-tab="apps" aria-label="Apps">
+          <svg viewBox="0 0 24 24"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg>
+        </button>
+        <button class="seg-btn" data-tab="media" aria-label="Media">
+          <svg viewBox="0 0 24 24"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>
+        </button>
+      </div>
+
+      <button id="ring-remote-btn" class="m3-icon-circle hidden" aria-label="Ring Physical Remote">
+        <svg viewBox="0 0 24 24"><path d="M8 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2.5 3.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM9 12v1.5h3V12H9zm0 3v1.5h3V15H9zm8.4-6.9a5.5 5.5 0 0 1 0 7.8l-1.4-1.4a3.5 3.5 0 0 0 0-5l1.4-1.4zm2.8-2.8a9.5 9.5 0 0 1 0 13.4l-1.4-1.4a7.5 7.5 0 0 0 0-10.6l1.4-1.4z"/></svg>
+      </button>
+    </header>
+
+    <section id="now-playing" class="m3-np-card hidden">
+      <div class="np-row">
+        <img id="np-art" class="np-art hidden" alt="" />
+        <div class="np-meta">
+          <div id="np-source" class="np-source"></div>
+          <div id="np-title" class="np-title"></div>
+          <div id="np-sub" class="np-sub"></div>
+        </div>
+        <button id="np-play" class="m3-squircle-fab" aria-label="Play/Pause">
+          <svg id="np-play-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+      </div>
+      <div class="np-progress-track">
+        <div id="np-progress" class="np-progress-fill"></div>
+      </div>
+      <div class="np-transport">
+        <button data-key="PREVIOUS" class="m3-icon-tonal" aria-label="Previous">
+          <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
+        <button data-key="REWIND" class="m3-icon-tonal" aria-label="Rewind 10s">
+          <svg viewBox="0 0 24 24"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>
+        </button>
+        <button data-key="FAST_FORWARD" class="m3-icon-tonal" aria-label="Forward 10s">
+          <svg viewBox="0 0 24 24"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>
+        </button>
+        <button data-key="NEXT" class="m3-icon-tonal" aria-label="Next">
+          <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+        </button>
+      </div>
+    </section>
+
+    <main id="tab-dpad" class="stage">
+      <div class="m3-ring-pad">
+        <button class="ring-btn ring-up" data-key="DPAD_UP" aria-label="Up">
+          <svg viewBox="0 0 24 24"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+        </button>
+        <button class="ring-btn ring-right" data-key="DPAD_RIGHT" aria-label="Right">
+          <svg viewBox="0 0 24 24"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>
+        </button>
+        <button class="ring-btn ring-down" data-key="DPAD_DOWN" aria-label="Down">
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+        </button>
+        <button class="ring-btn ring-left" data-key="DPAD_LEFT" aria-label="Left">
+          <svg viewBox="0 0 24 24"><path d="M15.41 16.59L10.83 12l4.58-4.59L14 6l-6 6 6 6z"/></svg>
+        </button>
+        <button class="ring-ok" data-key="DPAD_CENTER" aria-label="OK"></button>
+      </div>
+    </main>
+
+    <main id="tab-touchpad" class="stage hidden">
+      <div id="touchpad" class="m3-touchpad" aria-label="Swipe touchpad">
+        <svg viewBox="0 0 24 24"><path d="M9 11.24V7.5C9 6.12 10.12 5 11.5 5S14 6.12 14 7.5v3.74c1.21-.81 2-2.18 2-3.74C16 5.01 13.99 3 11.5 3S7 5.01 7 7.5c0 1.56.79 2.93 2 3.74zm9.84 4.63l-4.54-2.26c-.17-.07-.35-.11-.54-.11H13v-6c0-.83-.67-1.5-1.5-1.5S10 6.67 10 7.5v10.74l-3.43-.72c-.08-.01-.15-.03-.24-.03-.31 0-.59.13-.79.33l-.79.8 4.94 4.94c.27.27.65.44 1.06.44h6.79c.75 0 1.33-.55 1.44-1.28l.75-5.27c.01-.07.02-.14.02-.2 0-.62-.38-1.16-.91-1.38z"/></svg>
+      </div>
+    </main>
+
+    <main id="tab-apps" class="apps-stage hidden">
+      <div class="apps-search-wrap">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <input id="apps-search" type="search" placeholder="Search..." />
+      </div>
+      <div id="apps-grid" class="m3-apps-grid"></div>
+    </main>
+
+    <main id="tab-media" class="apps-stage hidden">
+      <div class="apps-search-wrap">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <input id="media-search" type="search" placeholder="Movies &amp; shows..." />
+      </div>
+      <div id="media-content" class="media-scroll"></div>
+    </main>
+
+    <footer id="remote-dock" class="m3-dock">
+      <div class="dock-row">
+        <button data-key="BACK" class="m3-dock-btn" aria-label="Back">
+          <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        </button>
+        <button data-key="HOME" class="m3-dock-btn tonal" aria-label="Home">
+          <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+        </button>
+        <button id="kbd-open-btn" class="m3-dock-btn" aria-label="Keyboard">
+          <svg viewBox="0 0 24 24"><path d="M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z"/></svg>
+        </button>
+      </div>
+      <div class="dock-row">
+        <button data-vol="DOWN" class="m3-dock-btn" aria-label="Volume Down">
+          <svg viewBox="0 0 24 24"><path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z"/></svg>
+        </button>
+        <button data-vol="MUTE" class="m3-dock-btn" aria-label="Mute">
+          <svg viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+        </button>
+        <button data-vol="UP" class="m3-dock-btn" aria-label="Volume Up">
+          <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <div id="kbd-modal" class="m3-modal hidden">
+    <div class="m3-sheet">
+      <div class="kbd-row">
+        <input id="kbd-input" type="text" placeholder="Type text..." />
+        <button id="kbd-send-btn" class="m3-filled-btn">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
