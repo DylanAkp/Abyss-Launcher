@@ -39,7 +39,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.graphics.Color
@@ -65,13 +68,12 @@ fun AppUpdateModal(
     onDismiss: () -> Unit,
     onUpdate: () -> Unit
 ) {
-    AnimatedVisibility(
-        visible = update != null,
-        enter = fadeIn() + scaleIn(initialScale = 0.96f),
-        exit = fadeOut() + scaleOut(targetScale = 0.96f)
-    ) {
-        if (update == null) return@AnimatedVisibility
+    if (update == null) return
 
+    Dialog(
+        onDismissRequest = { if (!isDownloading) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         val primaryButtonRequester = remember { FocusRequester() }
 
         LaunchedEffect(update, isDownloading, errorMessage) {
@@ -81,17 +83,11 @@ fun AppUpdateModal(
             } catch (_: Exception) {}
         }
 
-        BackHandler(enabled = true) {
-            if (!isDownloading) {
-                onDismiss()
-            }
-        }
-
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xD905060A))
-                .clickable(enabled = false) {},
+                .focusProperties { canFocus = false },
             contentAlignment = Alignment.Center
         ) {
             Box(

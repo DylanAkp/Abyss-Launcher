@@ -34,8 +34,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -64,12 +68,12 @@ fun AppContextMenu(
     onToggleHide: (TvAppInfo) -> Unit,
     onOpenSystemInfo: (TvAppInfo) -> Unit
 ) {
-    AnimatedVisibility(
-        visible = app != null,
-        enter = fadeIn(tween(140)),
-        exit = fadeOut(tween(120))
+    if (app == null) return
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        if (app == null) return@AnimatedVisibility
         val initialFocusRequester = remember { FocusRequester() }
         var hasSeenFreshDown by remember(app.packageName) { mutableStateOf(false) }
 
@@ -82,6 +86,7 @@ fun AppContextMenu(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xB305070C))
+                .focusProperties { canFocus = false }
                 .onPreviewKeyEvent { event ->
                     val native = event.nativeKeyEvent
                     val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
@@ -107,7 +112,11 @@ fun AppContextMenu(
                         false
                     }
                 }
-                .clickable { onDismiss() },
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss
+                ),
             contentAlignment = Alignment.Center
         ) {
             // Modal Sheet (Zero Outline)

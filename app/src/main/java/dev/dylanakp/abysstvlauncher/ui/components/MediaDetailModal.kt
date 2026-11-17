@@ -29,8 +29,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -56,12 +60,12 @@ fun MediaDetailModal(
     onPlay: (MediaItem) -> Unit,
     onRequestOnSeer: ((MediaItem) -> Unit)? = null
 ) {
-    AnimatedVisibility(
-        visible = item != null,
-        enter = fadeIn(),
-        exit = fadeOut()
+    if (item == null) return
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        if (item == null) return@AnimatedVisibility
         val primaryButtonRequester = remember { FocusRequester() }
 
         LaunchedEffect(item) {
@@ -78,7 +82,12 @@ fun MediaDetailModal(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xCC000000))
-                .clickable { onDismiss() },
+                .focusProperties { canFocus = false }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss
+                ),
             contentAlignment = Alignment.Center
         ) {
             Box(
