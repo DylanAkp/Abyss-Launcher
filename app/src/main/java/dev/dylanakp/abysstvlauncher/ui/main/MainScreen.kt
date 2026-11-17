@@ -200,6 +200,9 @@ fun MainScreen(
             onPlayEpisode = { episode, nextEpisode, savedPositionMs ->
                 viewModel.playSeriesEpisode(selectedSeries, episode, nextEpisode, savedPositionMs)
             },
+            onSelectEpisodeVersion = { episodeId, versionId ->
+                viewModel.selectEpisodeVersion(episodeId, versionId)
+            },
             onMarkEpisodesWatched = { allEpisodes, targetEpisode ->
                 viewModel.markEpisodesUpToWatched(selectedSeries, allEpisodes, targetEpisode)
             },

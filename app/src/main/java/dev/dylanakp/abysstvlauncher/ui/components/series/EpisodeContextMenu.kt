@@ -58,6 +58,7 @@ fun EpisodeContextMenu(
     seriesItem: MediaItem,
     isWatched: Boolean,
     onDismiss: () -> Unit,
+    onSelectVersion: (() -> Unit)? = null,
     onToggleSingleWatched: () -> Unit,
     onMarkAllPreviousWatched: () -> Unit,
     onMarkAllFollowingUnwatched: () -> Unit
@@ -156,6 +157,16 @@ fun EpisodeContextMenu(
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
+
+                if (onSelectVersion != null && episode.versions.size > 1) {
+                    val activeVer = episode.versions.firstOrNull { it.id == episode.selectedVersionId }
+                        ?: episode.versions.firstOrNull()
+                    EpisodeContextMenuItem(
+                        label = "Source (${episode.versions.size})${if (activeVer != null) " • ${activeVer.name}" else ""}",
+                        icon = AbyssIconType.CHEVRON_DOWN,
+                        onClick = onSelectVersion
+                    )
+                }
 
                 val watchedLabel = if (isWatched) {
                     stringResource(R.string.episode_action_mark_unwatched)

@@ -112,7 +112,9 @@ data class SeriesEpisode(
     val containerExtension: String = "mp4",
     val progressPercent: Float = 0f,
     val savedPositionMs: Long = 0L,
-    val savedDurationMs: Long = 0L
+    val savedDurationMs: Long = 0L,
+    val versions: List<MediaVersion> = emptyList(),
+    val selectedVersionId: String? = null
 )
 
 @Immutable

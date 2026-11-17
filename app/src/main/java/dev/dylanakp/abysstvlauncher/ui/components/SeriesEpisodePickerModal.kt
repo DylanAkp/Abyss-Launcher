@@ -63,7 +63,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dylanakp.abysstvlauncher.R
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import dev.dylanakp.abysstvlauncher.model.MediaItem
+import dev.dylanakp.abysstvlauncher.model.MediaVersion
 import dev.dylanakp.abysstvlauncher.model.PlaybackHistoryEntry
 import dev.dylanakp.abysstvlauncher.model.SeriesDetails
 import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
@@ -89,15 +96,19 @@ fun SeriesDetailScreen(
     playbackHistory: Map<String, PlaybackHistoryEntry>,
     onBack: () -> Unit,
     onPlayEpisode: (SeriesEpisode, SeriesEpisode?, Long) -> Unit,
+    onSelectEpisodeVersion: ((String, String) -> Unit)? = null,
     onMarkEpisodesWatched: ((List<SeriesEpisode>, SeriesEpisode) -> Unit)? = null,
     onToggleSingleEpisodeWatched: ((List<SeriesEpisode>, SeriesEpisode) -> Unit)? = null,
     onMarkEpisodesUnwatchedFrom: ((List<SeriesEpisode>, SeriesEpisode) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var episodeForMenu by remember { mutableStateOf<SeriesEpisode?>(null) }
+    var episodeForVersionPicker by remember { mutableStateOf<SeriesEpisode?>(null) }
 
     BackHandler {
-        if (episodeForMenu != null) {
+        if (episodeForVersionPicker != null) {
+            episodeForVersionPicker = null
+        } else if (episodeForMenu != null) {
             episodeForMenu = null
         } else {
             onBack()
@@ -358,6 +369,24 @@ fun SeriesDetailScreen(
                                         }
                                     )
                                 }
+
+                                if (ep.versions.size > 1) {
+                                    val activeVer = ep.versions.firstOrNull { it.id == ep.selectedVersionId }
+                                        ?: ep.versions.firstOrNull()
+                                    SeriesActionPill(
+                                        label = activeVer?.name ?: stringResource(R.string.movie_versions_title),
+                                        icon = AbyssIconType.CHEVRON_DOWN,
+                                        onNavigateDown = {
+                                            try {
+                                                if (seasons.size > 1) firstSeasonTabRequester.requestFocus()
+                                                else firstEpisodeRequester.requestFocus()
+                                            } catch (_: Exception) {}
+                                        },
+                                        onClick = {
+                                            episodeForVersionPicker = ep
+                                        }
+                                    )
+                                }
                             } else if (!isLoading) {
                                 SeriesActionPill(
                                     label = stringResource(R.string.btn_back),
@@ -516,6 +545,13 @@ fun SeriesDetailScreen(
             seriesItem = seriesItem,
             isWatched = (episodeForMenu?.let { getEpisodeProgress(it) } ?: 0f) >= 0.95f,
             onDismiss = { episodeForMenu = null },
+            onSelectVersion = if ((episodeForMenu?.versions?.size ?: 0) > 1) {
+                {
+                    val target = episodeForMenu
+                    episodeForMenu = null
+                    episodeForVersionPicker = target
+                }
+            } else null,
             onToggleSingleWatched = {
                 val targetEp = episodeForMenu ?: return@EpisodeContextMenu
                 episodeForMenu = null
@@ -535,6 +571,146 @@ fun SeriesDetailScreen(
                 onMarkEpisodesUnwatchedFrom?.invoke(allEps, targetEp)
             }
         )
+
+        val versionTarget = episodeForVersionPicker
+        if (versionTarget != null && versionTarget.versions.size > 1) {
+            EpisodeVersionPickerDialog(
+                episode = versionTarget,
+                onDismiss = { episodeForVersionPicker = null },
+                onSelectVersion = { versionId ->
+                    onSelectEpisodeVersion?.invoke(versionTarget.id, versionId)
+                    episodeForVersionPicker = null
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun EpisodeVersionPickerDialog(
+    episode: SeriesEpisode,
+    onDismiss: () -> Unit,
+    onSelectVersion: (String) -> Unit
+) {
+    val firstRequester = remember { FocusRequester() }
+    val selectedId = episode.selectedVersionId ?: episode.versions.firstOrNull()?.id
+
+    LaunchedEffect(episode.id) {
+        delay(60L)
+        try { firstRequester.requestFocus() } catch (_: Exception) {}
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xA6000000))
+                .focusProperties { canFocus = false }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(520.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xFF191C24))
+                    .border(1.dp, Color(0x24FFFFFF), RoundedCornerShape(28.dp))
+                    .focusProperties { canFocus = false }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    )
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                val epCode = "S${episode.seasonNumber.toString().padStart(2, '0')}E${episode.episodeNumber.toString().padStart(2, '0')}"
+                Text(
+                    text = "${stringResource(R.string.movie_versions_title)} • $epCode",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = AbyssTextPrimary
+                )
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    itemsIndexed(episode.versions) { index, ver ->
+                        EpisodeVersionRow(
+                            version = ver,
+                            isSelected = ver.id == selectedId,
+                            focusRequester = if (index == 0) firstRequester else null,
+                            onClick = { onSelectVersion(ver.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EpisodeVersionRow(
+    version: MediaVersion,
+    isSelected: Boolean,
+    focusRequester: FocusRequester?,
+    onClick: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val bgColor = when {
+        isFocused -> Color.White
+        isSelected -> Color(0x38FFFFFF)
+        else -> Color(0xFF252A36)
+    }
+    val textColor = if (isFocused) Color(0xFF14171F) else AbyssTextPrimary
+    val subColor = if (isFocused) Color(0xFF475569) else AbyssTextSecondary
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .clip(RoundedCornerShape(16.dp))
+            .background(bgColor)
+            .onFocusChanged { isFocused = it.isFocused }
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = version.name,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = textColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            val meta = listOf(version.resolution, version.videoCodec, version.audioCodec)
+                .filter { it.isNotBlank() }
+                .joinToString(" • ")
+            if (meta.isNotBlank()) {
+                Text(
+                    text = meta,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = subColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        if (isSelected) {
+            AbyssIcon(
+                type = AbyssIconType.CHECK,
+                color = textColor,
+                size = 18.dp
+            )
+        }
     }
 }
 

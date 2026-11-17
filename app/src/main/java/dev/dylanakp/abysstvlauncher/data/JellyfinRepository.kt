@@ -659,7 +659,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                     httpGet("$server/Shows/$seriesId/Seasons?userId=$userId&Fields=Overview,PrimaryImageAspectRatio", token)
                 }
                 val episodesDeferred = async {
-                    httpGet("$server/Shows/$seriesId/Episodes?userId=$userId&Fields=Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,IndexNumber,ParentIndexNumber", token)
+                    httpGet("$server/Shows/$seriesId/Episodes?userId=$userId&Fields=Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,IndexNumber,ParentIndexNumber,MediaSources", token)
                 }
                 seasonsDeferred.await() to episodesDeferred.await()
             }
@@ -693,6 +693,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                         durationMs > 0L && posMs > 0L -> (posMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
                         else -> 0f
                     }
+                    val epVersions = parseMediaVersions(eObj.mediaSources)
                     SeriesEpisode(
                         id = epId,
                         seriesId = seriesId,
@@ -704,7 +705,9 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                         posterUrl = "$server/Items/$epId/Images/Primary?fillWidth=400&quality=90",
                         progressPercent = progress,
                         savedPositionMs = posMs,
-                        savedDurationMs = durationMs
+                        savedDurationMs = durationMs,
+                        versions = epVersions,
+                        selectedVersionId = epVersions.firstOrNull()?.id
                     )
                 }
                 SeriesSeason(
@@ -743,68 +746,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                         ?: obj.tagline.orEmpty()
                     tagline = tagline.removePrefix("[\"").removeSuffix("\"]").removeSurrounding("\"").trim()
                     genres.addAll(obj.genres)
-
-                    for ((i, src) in obj.mediaSources.withIndex()) {
-                        val srcId = src.id
-                        var srcName = src.name
-                        val container = src.container
-                        val size = src.size
-                        val bitrate = src.bitrate
-
-                        var resStr = ""
-                        var vCodec = ""
-                        var aCodec = ""
-
-                        for (stream in src.mediaStreams) {
-                            val type = stream.type
-                            if (type.equals("Video", ignoreCase = true) && resStr.isBlank()) {
-                                val height = stream.height ?: 0
-                                val width = stream.width ?: 0
-                                vCodec = stream.codec.uppercase()
-                                val videoRange = stream.videoRange
-                                resStr = when {
-                                    height >= 2000 || width >= 3800 -> "4K"
-                                    height >= 1000 || width >= 1900 -> "1080p"
-                                    height >= 700 || width >= 1200 -> "720p"
-                                    else -> if (height > 0) "${height}p" else ""
-                                }
-                                if (videoRange.isNotBlank() && videoRange != "SDR") {
-                                    resStr = if (resStr.isNotBlank()) "$resStr $videoRange" else videoRange
-                                }
-                            } else if (type.equals("Audio", ignoreCase = true) && aCodec.isBlank()) {
-                                val rawCodec = stream.codec.uppercase()
-                                val channels = when (stream.channels) {
-                                    8 -> "7.1"
-                                    6 -> "5.1"
-                                    2 -> "2.0"
-                                    else -> ""
-                                }
-                                aCodec = if (rawCodec.isNotBlank()) {
-                                    if (channels.isNotBlank()) "$rawCodec $channels" else rawCodec
-                                } else {
-                                    stream.displayTitle.take(10)
-                                }
-                            }
-                        }
-
-                        if (srcName.isBlank() || srcName.equals("File", ignoreCase = true)) {
-                            srcName = listOf(resStr, vCodec, container.uppercase()).filter { it.isNotBlank() }.joinToString(" • ")
-                            if (srcName.isBlank()) srcName = "Version ${i + 1}"
-                        }
-
-                        versions.add(
-                            MediaVersion(
-                                id = srcId,
-                                name = srcName,
-                                container = container,
-                                resolution = resStr,
-                                videoCodec = vCodec,
-                                audioCodec = aCodec,
-                                sizeBytes = size,
-                                bitrate = bitrate
-                            )
-                        )
-                    }
+                    versions.addAll(parseMediaVersions(obj.mediaSources))
 
                     if (obj.localTrailerCount > 0) {
                         val trailersRaw = httpGet("$server/Users/$userId/Items/$jfId/LocalTrailers", token)
@@ -851,6 +793,64 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
             trailerName = trailerName,
             isLocalTrailer = isLocalTrailer
         )
+    }
+
+    private fun parseMediaVersions(sources: List<JellyfinMediaSourceDto>): List<MediaVersion> {
+        return sources.mapIndexed { i, src ->
+            var srcName = src.name
+            val container = src.container
+            var resStr = ""
+            var vCodec = ""
+            var aCodec = ""
+
+            for (stream in src.mediaStreams) {
+                val type = stream.type
+                if (type.equals("Video", ignoreCase = true) && resStr.isBlank()) {
+                    val height = stream.height ?: 0
+                    val width = stream.width ?: 0
+                    vCodec = stream.codec.uppercase()
+                    val videoRange = stream.videoRange
+                    resStr = when {
+                        height >= 2000 || width >= 3800 -> "4K"
+                        height >= 1000 || width >= 1900 -> "1080p"
+                        height >= 700 || width >= 1200 -> "720p"
+                        else -> if (height > 0) "${height}p" else ""
+                    }
+                    if (videoRange.isNotBlank() && videoRange != "SDR") {
+                        resStr = if (resStr.isNotBlank()) "$resStr $videoRange" else videoRange
+                    }
+                } else if (type.equals("Audio", ignoreCase = true) && aCodec.isBlank()) {
+                    val rawCodec = stream.codec.uppercase()
+                    val channels = when (stream.channels) {
+                        8 -> "7.1"
+                        6 -> "5.1"
+                        2 -> "2.0"
+                        else -> ""
+                    }
+                    aCodec = if (rawCodec.isNotBlank()) {
+                        if (channels.isNotBlank()) "$rawCodec $channels" else rawCodec
+                    } else {
+                        stream.displayTitle.take(10)
+                    }
+                }
+            }
+
+            if (srcName.isBlank() || srcName.equals("File", ignoreCase = true)) {
+                srcName = listOf(resStr, vCodec, container.uppercase()).filter { it.isNotBlank() }.joinToString(" • ")
+                if (srcName.isBlank()) srcName = "Version ${i + 1}"
+            }
+
+            MediaVersion(
+                id = src.id,
+                name = srcName,
+                container = container,
+                resolution = resStr,
+                videoCodec = vCodec,
+                audioCodec = aCodec,
+                sizeBytes = src.size,
+                bitrate = src.bitrate
+            )
+        }
     }
 
     override suspend fun preparePlayback(config: JellyfinConfig, itemId: String): Boolean = withContext(Dispatchers.IO) {

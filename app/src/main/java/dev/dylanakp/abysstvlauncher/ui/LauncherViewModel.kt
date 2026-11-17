@@ -646,14 +646,49 @@ class LauncherViewModel : ViewModel() {
         }
     }
 
+    private val preferredSeriesVersionLabel = mutableMapOf<String, String>()
+
+    fun selectEpisodeVersion(episodeId: String, versionId: String) {
+        _uiState.update { state ->
+            val currentDetails = state.activeSeriesDetails ?: return@update state
+            var matchedLabel: String? = null
+            val updatedSeasons = currentDetails.seasons.map { season ->
+                season.copy(
+                    episodes = season.episodes.map { ep ->
+                        if (ep.id == episodeId) {
+                            matchedLabel = ep.versions.firstOrNull { it.id == versionId }?.name
+                            ep.copy(selectedVersionId = versionId)
+                        } else ep
+                    }
+                )
+            }
+            if (matchedLabel != null) {
+                preferredSeriesVersionLabel[currentDetails.seriesItem.id] = matchedLabel!!
+            }
+            state.copy(activeSeriesDetails = currentDetails.copy(seasons = updatedSeasons))
+        }
+    }
+
     fun playSeriesEpisode(
         seriesItem: MediaItem,
         episode: SeriesEpisode,
         nextEpisode: SeriesEpisode?,
-        startPositionMs: Long
+        startPositionMs: Long,
+        versionId: String? = null
     ) {
         val config = _uiState.value.jellyfinConfig
-        val safeStreamUrl = JellyfinRepository.sanitizeStreamUrl(episode.streamUrl, config)
+        val prefLabel = preferredSeriesVersionLabel[seriesItem.id]
+        val chosenVersion = versionId?.let { id -> episode.versions.firstOrNull { it.id == id } }
+            ?: episode.selectedVersionId?.let { id -> episode.versions.firstOrNull { it.id == id } }
+            ?: prefLabel?.let { label ->
+                episode.versions.firstOrNull { it.name.equals(label, ignoreCase = true) }
+                    ?: episode.versions.firstOrNull { it.resolution.isNotBlank() && label.contains(it.resolution, ignoreCase = true) }
+            }
+            ?: episode.versions.firstOrNull()
+        if (chosenVersion != null) {
+            preferredSeriesVersionLabel[seriesItem.id] = chosenVersion.name
+        }
+        val safeStreamUrl = JellyfinRepository.sanitizeStreamUrl(episode.streamUrl, config, chosenVersion?.id)
         val safeEpisode = episode.copy(streamUrl = safeStreamUrl)
         val epCode = "S${safeEpisode.seasonNumber.toString().padStart(2, '0')}E${safeEpisode.episodeNumber.toString().padStart(2, '0')}"
         val session = PlayerSession(
