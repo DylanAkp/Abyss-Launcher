@@ -653,63 +653,64 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         val token = config.accessToken
         val seriesId = seriesItem.id
 
-        val seasonsUrl = "$server/Shows/$seriesId/Seasons?userId=$userId&Fields=Overview,PrimaryImageAspectRatio"
-        val seasonsRaw = httpGet(seasonsUrl, token) ?: return@withContext null
-
         try {
-            val root = json.decodeFromString<JellyfinQueryResponseDto>(seasonsRaw)
-            val seasonList = mutableListOf<SeriesSeason>()
+            val (seasonsRaw, allEpisodesRaw) = coroutineScope {
+                val seasonsDeferred = async {
+                    httpGet("$server/Shows/$seriesId/Seasons?userId=$userId&Fields=Overview,PrimaryImageAspectRatio", token)
+                }
+                val episodesDeferred = async {
+                    httpGet("$server/Shows/$seriesId/Episodes?userId=$userId&Fields=Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,IndexNumber,ParentIndexNumber", token)
+                }
+                seasonsDeferred.await() to episodesDeferred.await()
+            }
+            if (seasonsRaw == null) return@withContext null
 
-            for ((s, sObj) in root.items.withIndex()) {
+            val root = json.decodeFromString<JellyfinQueryResponseDto>(seasonsRaw)
+            val allEpisodes = if (allEpisodesRaw != null) {
+                json.decodeFromString<JellyfinQueryResponseDto>(allEpisodesRaw).items
+            } else emptyList()
+
+            val bySeasonId = allEpisodes.groupBy { it.seasonId.orEmpty() }
+            val bySeasonNum = allEpisodes.groupBy { it.parentIndexNumber ?: 1 }
+
+            val seasonList = root.items.mapIndexed { s, sObj ->
                 val seasonId = sObj.id
                 val seasonNum = sObj.indexNumber ?: (s + 1)
                 val sName = sObj.name.ifBlank { "Saison $seasonNum" }
+                val rawEps = bySeasonId[seasonId]?.takeIf { it.isNotEmpty() } ?: bySeasonNum[seasonNum].orEmpty()
 
-                val epUrl = "$server/Shows/$seriesId/Episodes?seasonId=$seasonId&userId=$userId&Fields=Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,IndexNumber,ParentIndexNumber"
-                val epRaw = httpGet(epUrl, token)
-                val epList = mutableListOf<SeriesEpisode>()
-                if (epRaw != null) {
-                    val epRoot = json.decodeFromString<JellyfinQueryResponseDto>(epRaw)
-                    for ((e, eObj) in epRoot.items.withIndex()) {
-                        val epId = eObj.id
-                        val epNum = eObj.indexNumber ?: (e + 1)
-                        val epName = eObj.name.ifBlank { "Épisode $epNum" }
-                        val overview = eObj.overview.orEmpty()
-                        val runTimeTicks = eObj.runTimeTicks ?: 0L
-                        val durationMs = runTimeTicks / 10_000L
-                        val userData = eObj.userData
-                        val played = userData?.played ?: false
-                        val posTicks = userData?.playbackPositionTicks ?: 0L
-                        val posMs = posTicks / 10_000L
-                        val progress = when {
-                            played -> 1.0f
-                            durationMs > 0L && posMs > 0L -> (posMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-                            else -> 0f
-                        }
-
-                        epList.add(
-                            SeriesEpisode(
-                                id = epId,
-                                seriesId = seriesId,
-                                seasonNumber = seasonNum,
-                                episodeNumber = epNum,
-                                title = epName,
-                                plot = overview,
-                                streamUrl = "$server/Videos/$epId/stream?static=true&api_key=$token&userId=$userId",
-                                posterUrl = "$server/Items/$epId/Images/Primary?fillWidth=400&quality=90",
-                                progressPercent = progress,
-                                savedPositionMs = posMs,
-                                savedDurationMs = durationMs
-                            )
-                        )
+                val epList = rawEps.mapIndexed { e, eObj ->
+                    val epId = eObj.id
+                    val epNum = eObj.indexNumber ?: (e + 1)
+                    val epName = eObj.name.ifBlank { "Épisode $epNum" }
+                    val overview = eObj.overview.orEmpty()
+                    val durationMs = (eObj.runTimeTicks ?: 0L) / 10_000L
+                    val userData = eObj.userData
+                    val played = userData?.played ?: false
+                    val posMs = (userData?.playbackPositionTicks ?: 0L) / 10_000L
+                    val progress = when {
+                        played -> 1.0f
+                        durationMs > 0L && posMs > 0L -> (posMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                        else -> 0f
                     }
-                }
-                seasonList.add(
-                    SeriesSeason(
+                    SeriesEpisode(
+                        id = epId,
+                        seriesId = seriesId,
                         seasonNumber = seasonNum,
-                        name = sName,
-                        episodes = epList
+                        episodeNumber = epNum,
+                        title = epName,
+                        plot = overview,
+                        streamUrl = "$server/Videos/$epId/stream?static=true&api_key=$token&userId=$userId",
+                        posterUrl = "$server/Items/$epId/Images/Primary?fillWidth=400&quality=90",
+                        progressPercent = progress,
+                        savedPositionMs = posMs,
+                        savedDurationMs = durationMs
                     )
+                }
+                SeriesSeason(
+                    seasonNumber = seasonNum,
+                    name = sName,
+                    episodes = epList
                 )
             }
             SeriesDetails(seriesItem = seriesItem, seasons = seasonList)
