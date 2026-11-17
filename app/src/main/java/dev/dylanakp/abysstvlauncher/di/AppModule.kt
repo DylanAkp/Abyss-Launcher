@@ -18,6 +18,8 @@ import dev.dylanakp.abysstvlauncher.domain.repository.TmdbRepository as ITmdbRep
 import dev.dylanakp.abysstvlauncher.domain.repository.WeatherRepository as IWeatherRepository
 import dev.dylanakp.abysstvlauncher.player.PlayerManager
 import dev.dylanakp.abysstvlauncher.player.PlayerManagerImpl
+import dev.dylanakp.abysstvlauncher.remote.RemoteHttpServer
+import dev.dylanakp.abysstvlauncher.remote.TvCommandController
 import dev.dylanakp.abysstvlauncher.ui.LauncherViewModel
 import dev.dylanakp.abysstvlauncher.ui.viewmodels.CatalogViewModel
 import dev.dylanakp.abysstvlauncher.ui.viewmodels.DiscoverViewModel
@@ -79,6 +81,9 @@ val appModule = module {
     single { AppUpdateRepository }
 
     single<PlayerManager> { PlayerManagerImpl(androidContext()) }
+
+    single { TvCommandController(androidContext(), get(), get(), get(), get(), get()) }
+    single { RemoteHttpServer(androidContext(), get(), get()) }
 
     viewModelOf(::LauncherViewModel)
     viewModelOf(::HomeViewModel)

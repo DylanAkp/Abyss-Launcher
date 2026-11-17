@@ -17,19 +17,35 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import dev.dylanakp.abysstvlauncher.data.LauncherPreferences
 import dev.dylanakp.abysstvlauncher.model.AppLanguage
+import dev.dylanakp.abysstvlauncher.remote.RemoteBridgeService
+import dev.dylanakp.abysstvlauncher.remote.TvCommandController
 import dev.dylanakp.abysstvlauncher.theme.AbyssTVLauncherTheme
 import dev.dylanakp.abysstvlauncher.ui.LauncherViewModel
 import dev.dylanakp.abysstvlauncher.ui.main.MainScreen
+import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: LauncherViewModel by viewModel()
+    private val remoteController: TvCommandController by inject()
+    private val preferences: LauncherPreferences by inject()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (preferences.remoteServerEnabled) {
+            RemoteBridgeService.start(this)
+        }
+        lifecycleScope.launch {
+            remoteController.playMediaRequests.collect { item ->
+                viewModel.onMediaItemClicked(this@MainActivity, item)
+            }
+        }
 
         setContent {
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -82,6 +98,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        remoteController.attachActivity(this)
         viewModel.refreshInstalledApps(this)
         viewModel.onActivityResumed()
         if (intent?.hasCategory(Intent.CATEGORY_HOME) == true || intent?.action == Intent.ACTION_MAIN) {
@@ -99,6 +116,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        remoteController.detachActivity(this)
         viewModel.onActivityStopped()
     }
 }
