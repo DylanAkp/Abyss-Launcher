@@ -265,4 +265,26 @@
     <string name="weather_celsius_sub">Affichage de la température en degrés Celsius</string>
     <string name="weather_fahrenheit_sub">Affichage de la température en degrés Fahrenheit</string>
     <string name="appearance_show_hidden_apps_sub">Afficher ou masquer les applications cachées dans la grille</string>
+
+    <!-- Télécommande Web -->
+    <string name="settings_section_remote">Télécommande Web</string>
+    <string name="settings_section_remote_sub">QR Téléphone &amp; Lecture</string>
+    <string name="remote_accessibility_label">Télécommande Web Abyss</string>
+    <string name="remote_accessibility_desc">Permet à la télécommande Web Abyss d\'envoyer Retour, Accueil et D-Pad dans les autres apps.</string>
+    <string name="remote_server_group">Serveur Télécommande Web</string>
+    <string name="remote_enable_title">Activer la télécommande Web</string>
+    <string name="remote_enable_sub">Héberge la télécommande sur le port 5400 (mDNS : abyss-tv.local)</string>
+    <string name="remote_pair_group">Associer un téléphone</string>
+    <string name="remote_scan_qr_hint">Scannez avec l\'appareil photo du téléphone (même réseau Wi-Fi/LAN) pour ouvrir et associer.</string>
+    <string name="remote_pin_label">Code PIN : %1$s</string>
+    <string name="remote_paired_count">Téléphones associés : %1$d (Actifs : %2$d)</string>
+    <string name="remote_regen_pin">Nouveau PIN</string>
+    <string name="remote_revoke_all">Dissocier tous</string>
+    <string name="remote_permissions_group">Permissions multi-apps (optionnel)</string>
+    <string name="remote_notif_access_title">Lecture en cours (apps externes)</string>
+    <string name="remote_notif_access_on">Accordée — YouTube, Netflix, VLC affichent le titre en cours</string>
+    <string name="remote_notif_access_off">Désactivée — ouvrir l\'accès aux notifications</string>
+    <string name="remote_acc_access_title">Navigation multi-apps (Accessibilité)</string>
+    <string name="remote_acc_access_on">Activée — Retour et Accueil fonctionnent hors Abyss</string>
+    <string name="remote_acc_access_off">Désactivée — activer le service d\'accessibilité</string>
 </resources>

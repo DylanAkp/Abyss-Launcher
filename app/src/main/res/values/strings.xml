@@ -265,4 +265,26 @@
     <string name="weather_celsius_sub">Displays temperature in degrees Celsius</string>
     <string name="weather_fahrenheit_sub">Displays temperature in degrees Fahrenheit</string>
     <string name="appearance_show_hidden_apps_sub">Display hidden applications inside the apps catalog</string>
+
+    <!-- Web Remote -->
+    <string name="settings_section_remote">Web Remote</string>
+    <string name="settings_section_remote_sub">Phone QR &amp; Now Playing</string>
+    <string name="remote_accessibility_label">Abyss Web Remote</string>
+    <string name="remote_accessibility_desc">Allows Abyss Web Remote to send Back, Home, and D-Pad navigation across apps.</string>
+    <string name="remote_server_group">Web Remote Server</string>
+    <string name="remote_enable_title">Enable Web Remote</string>
+    <string name="remote_enable_sub">Host local controller on port 5400 (mDNS: abyss-tv.local)</string>
+    <string name="remote_pair_group">Pair a Phone</string>
+    <string name="remote_scan_qr_hint">Scan with your phone camera (same Wi-Fi/LAN) to open and pair automatically.</string>
+    <string name="remote_pin_label">Pairing PIN: %1$s</string>
+    <string name="remote_paired_count">Paired devices: %1$d (Active: %2$d)</string>
+    <string name="remote_regen_pin">Regenerate PIN</string>
+    <string name="remote_revoke_all">Unpair All Phones</string>
+    <string name="remote_permissions_group">Optional Cross-App Permissions</string>
+    <string name="remote_notif_access_title">External Now Playing Access</string>
+    <string name="remote_notif_access_on">Granted — external apps (YouTube, Netflix, VLC) report Now Playing</string>
+    <string name="remote_notif_access_off">Off — tap to allow Notification Access for external apps</string>
+    <string name="remote_acc_access_title">Cross-App Navigation (Accessibility)</string>
+    <string name="remote_acc_access_on">Enabled — Back &amp; Home work outside Abyss Launcher</string>
+    <string name="remote_acc_access_off">Off — tap to enable Accessibility Service</string>
 </resources>

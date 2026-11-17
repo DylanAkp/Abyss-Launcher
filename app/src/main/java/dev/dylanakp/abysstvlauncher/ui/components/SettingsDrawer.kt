@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.ui.components.settings.AppearanceSectionContent
 import dev.dylanakp.abysstvlauncher.ui.components.settings.JellyfinSectionContent
+import dev.dylanakp.abysstvlauncher.ui.components.settings.RemoteSectionContent
 import dev.dylanakp.abysstvlauncher.ui.components.settings.SeerSectionContent
 import dev.dylanakp.abysstvlauncher.ui.components.settings.SettingsGroup
 import dev.dylanakp.abysstvlauncher.data.WeatherInfo
@@ -74,7 +75,8 @@ import kotlinx.coroutines.delay
 private enum class SettingsSection {
     JELLYFIN,
     SEER,
-    APPEARANCE
+    APPEARANCE,
+    REMOTE
 }
 
 @Composable
@@ -110,6 +112,7 @@ fun SettingsDrawer(
         val navJfFocusRequester = remember { FocusRequester() }
         val navSeerFocusRequester = remember { FocusRequester() }
         val navAppearanceFocusRequester = remember { FocusRequester() }
+        val navRemoteFocusRequester = remember { FocusRequester() }
 
         LaunchedEffect(isOpen) {
             if (isOpen) {
@@ -255,6 +258,15 @@ fun SettingsDrawer(
                             onClick = { activeSection = SettingsSection.APPEARANCE }
                         )
 
+                        SettingsNavTab(
+                            label = stringResource(R.string.settings_section_remote),
+                            subLabel = stringResource(R.string.settings_section_remote_sub),
+                            icon = AbyssIconType.REMOTE,
+                            isSelected = activeSection == SettingsSection.REMOTE,
+                            focusRequester = navRemoteFocusRequester,
+                            onClick = { activeSection = SettingsSection.REMOTE }
+                        )
+
                         Spacer(modifier = Modifier.height(10.dp))
 
                         Text(
@@ -316,6 +328,9 @@ fun SettingsDrawer(
                                     onUpdateWeatherCity = onUpdateWeatherCity,
                                     onSelectTemperatureUnit = onSelectTemperatureUnit
                                 )
+                            }
+                            SettingsSection.REMOTE -> {
+                                RemoteSectionContent()
                             }
                         }
                     }
