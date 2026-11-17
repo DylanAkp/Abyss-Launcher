@@ -94,11 +94,20 @@ jobs:
 
       - name: Generate Changelog
         id: changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${{ steps.versioning.outputs.version_name }}$" | head -n 1 || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            LOG=$(git log "$PREV_TAG"..HEAD --pretty=format:"* %s (%h)")
-          else
+          CURRENT_TAG="${{ steps.versioning.outputs.version_name }}"
+          PREV_TAG=$(gh api "repos/${{ github.repository }}/releases/latest" --jq '.tag_name' 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$CURRENT_TAG" ]; then
+            PREV_TAG=$(git tag -l '[0-9][0-9].[0-9][0-9].*' --sort=-v:refname | grep -vxF "$CURRENT_TAG" | head -n 1 || echo "")
+          fi
+
+          LOG=""
+          if [ -n "$PREV_TAG" ] && git rev-parse -q --verify "refs/tags/$PREV_TAG" >/dev/null; then
+            LOG=$(git log "${PREV_TAG}..HEAD" --pretty=format:"* %s (%h)")
+          fi
+          if [ -z "$LOG" ]; then
             LOG=$(git log -n 25 --pretty=format:"* %s (%h)")
           fi
           {
