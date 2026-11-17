@@ -217,7 +217,8 @@ fun SettingsDrawer(
                     Column(
                         modifier = Modifier
                             .width(260.dp)
-                            .fillMaxHeight(),
+                            .fillMaxHeight()
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
