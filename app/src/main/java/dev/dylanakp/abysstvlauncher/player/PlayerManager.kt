@@ -166,7 +166,9 @@ class PlayerManagerImpl(
             ): AudioSink? {
                 val stereoDownmixer = ChannelMixingAudioProcessor().apply {
                     for (inCh in 3..8) {
-                        putChannelMixingMatrix(ChannelMixingMatrix.create(inCh, 2))
+                        runCatching {
+                            putChannelMixingMatrix(ChannelMixingMatrix.create(inCh, 2))
+                        }
                     }
                 }
                 val processors = if (isBluetoothOrHeadsetConnected()) {
