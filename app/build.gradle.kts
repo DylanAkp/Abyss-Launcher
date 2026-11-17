@@ -77,6 +77,8 @@ android {
     packaging {
       resources {
         excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        excludes += "/META-INF/INDEX.LIST"
+        excludes += "/META-INF/io.netty.versions.properties"
       }
     }
 }
@@ -150,6 +152,14 @@ dependencies {
   // Dependency Injection (Koin)
   implementation(libs.koin.android)
   implementation(libs.koin.androidx.compose)
+
+  // Embedded Web Remote Server (Ktor CIO) & QR Code
+  implementation(libs.ktor.server.core)
+  implementation(libs.ktor.server.cio)
+  implementation(libs.ktor.server.content.negotiation)
+  implementation(libs.ktor.serialization.kotlinx.json)
+  implementation(libs.ktor.server.sse)
+  implementation(libs.zxing.core)
 
   // Baseline Profiles / AOT compilation
   implementation(libs.androidx.profileinstaller)

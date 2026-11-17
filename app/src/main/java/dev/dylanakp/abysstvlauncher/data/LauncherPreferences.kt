@@ -233,6 +233,24 @@ class LauncherPreferences(private val context: Context) {
             prefs[KEY_SEARCH_HISTORY] = trimmed
         }
 
+    var remoteServerEnabled: Boolean
+        get() = read { prefs -> prefs[KEY_REMOTE_ENABLED] ?: true }
+        set(value) = mutate { prefs -> prefs[KEY_REMOTE_ENABLED] = value }
+
+    var remotePairingPin: String
+        get() = read { prefs ->
+            prefs[KEY_REMOTE_PIN]?.takeIf { it.length == 6 } ?: run {
+                val generated = (100000..999999).random().toString()
+                mutate { it[KEY_REMOTE_PIN] = generated }
+                generated
+            }
+        }
+        set(value) = mutate { prefs -> prefs[KEY_REMOTE_PIN] = value }
+
+    var remotePairedTokens: Set<String>
+        get() = read { prefs -> prefs[KEY_REMOTE_TOKENS] ?: emptySet() }
+        set(value) = mutate { prefs -> prefs[KEY_REMOTE_TOKENS] = value }
+
     companion object {
         private val KEY_LANGUAGE = stringPreferencesKey("language")
         private val KEY_ACCENT_PRESET = stringPreferencesKey("accent_preset")
@@ -261,5 +279,8 @@ class LauncherPreferences(private val context: Context) {
         private val KEY_WEATHER_CITY = stringPreferencesKey("weather_city")
         private val KEY_TEMP_UNIT = stringPreferencesKey("temp_unit")
         private val KEY_SEARCH_HISTORY = stringPreferencesKey("search_history")
+        private val KEY_REMOTE_ENABLED = booleanPreferencesKey("remote_enabled")
+        private val KEY_REMOTE_PIN = stringPreferencesKey("remote_pin")
+        private val KEY_REMOTE_TOKENS = stringSetPreferencesKey("remote_tokens")
     }
 }

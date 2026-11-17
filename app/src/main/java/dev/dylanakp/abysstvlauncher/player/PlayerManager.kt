@@ -64,6 +64,7 @@ data class PlayerPlaybackState(
 interface PlayerManager {
     val player: ExoPlayer
     val state: StateFlow<PlayerPlaybackState>
+    val currentSession: StateFlow<PlayerSession?>
 
     fun prepare(context: Context, session: PlayerSession)
     fun play()
@@ -89,6 +90,9 @@ class PlayerManagerImpl(
 
     private val _state = MutableStateFlow(PlayerPlaybackState())
     override val state: StateFlow<PlayerPlaybackState> = _state.asStateFlow()
+
+    private val _currentSession = MutableStateFlow<PlayerSession?>(null)
+    override val currentSession: StateFlow<PlayerSession?> = _currentSession.asStateFlow()
 
     private fun isBluetoothOrHeadsetConnected(): Boolean {
         val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
@@ -272,6 +276,7 @@ class PlayerManagerImpl(
     }
 
     override fun prepare(context: Context, session: PlayerSession) {
+        _currentSession.value = session
         _state.update {
             it.copy(
                 error = null,
@@ -389,6 +394,7 @@ class PlayerManagerImpl(
             .clearOverridesOfType(C.TRACK_TYPE_TEXT)
             .build()
         _state.update { PlayerPlaybackState() }
+        _currentSession.value = null
     }
 
     private fun refreshTracks(tracks: Tracks) {
