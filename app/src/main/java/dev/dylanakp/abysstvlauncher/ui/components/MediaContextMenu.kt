@@ -35,8 +35,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -73,66 +73,54 @@ fun MediaContextMenu(
 ) {
     if (media == null) return
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        val initialFocusRequester = remember { FocusRequester() }
-        var hasSeenFreshDown by remember(media.id) { mutableStateOf(false) }
+    val initialFocusRequester = remember { FocusRequester() }
+    var hasSeenFreshDown by remember(media.id) { mutableStateOf(false) }
 
-        val historyEntry = playbackHistory[media.id]
-        val isWatched = (historyEntry?.progressPercent ?: 0f) >= 0.95f
-        val hasContinueProgress = historyEntry != null && historyEntry.positionMs > 0L
+    val historyEntry = playbackHistory[media.id]
+    val isWatched = (historyEntry?.progressPercent ?: 0f) >= 0.95f
+    val hasContinueProgress = historyEntry != null && historyEntry.positionMs > 0L
 
-        LaunchedEffect(media.id) {
-            kotlinx.coroutines.delay(60L)
-            try { initialFocusRequester.requestFocus() } catch (_: Exception) {}
+    RequestModalInitialFocus(
+        focusRequester = initialFocusRequester,
+        media.id
+    )
+
+    AbyssModalOverlay(
+        scrimColor = Color(0xB305070C),
+        onDismiss = onDismiss,
+        modifier = Modifier.onPreviewKeyEvent { event ->
+            val native = event.nativeKeyEvent
+            val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                native.keyCode == KeyEvent.KEYCODE_ENTER ||
+                native.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+
+            if (isSelectKey) {
+                when (native.action) {
+                    KeyEvent.ACTION_DOWN -> {
+                        if (native.repeatCount == 0) {
+                            hasSeenFreshDown = true
+                            false
+                        } else {
+                            !hasSeenFreshDown
+                        }
+                    }
+                    KeyEvent.ACTION_UP -> {
+                        !hasSeenFreshDown
+                    }
+                    else -> false
+                }
+            } else {
+                false
+            }
         }
-
+    ) {
+        // Modal Sheet (Zero Outline)
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xB305070C))
-                .focusProperties { canFocus = false }
-                .onPreviewKeyEvent { event ->
-                    val native = event.nativeKeyEvent
-                    val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                        native.keyCode == KeyEvent.KEYCODE_ENTER ||
-                        native.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
-
-                    if (isSelectKey) {
-                        when (native.action) {
-                            KeyEvent.ACTION_DOWN -> {
-                                if (native.repeatCount == 0) {
-                                    hasSeenFreshDown = true
-                                    false
-                                } else {
-                                    !hasSeenFreshDown
-                                }
-                            }
-                            KeyEvent.ACTION_UP -> {
-                                !hasSeenFreshDown
-                            }
-                            else -> false
-                        }
-                    } else {
-                        false
-                    }
-                }
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismiss
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            // Modal Sheet (Zero Outline)
-            Box(
-                modifier = Modifier
-                    .width(420.dp)
-                    .clip(RoundedCornerShape(32.dp))
-                    .background(Color(0xFF0F1420))
-                    .clickable(enabled = false) {}
+                .width(420.dp)
+                .clip(RoundedCornerShape(32.dp))
+                .background(Color(0xFF0F1420))
+                .pointerInput(Unit) { detectTapGestures { } }
                     .padding(22.dp)
             ) {
                 Column(
@@ -160,8 +148,10 @@ fun MediaContextMenu(
                                     .allowHardware(true)
                                     .build()
                             }
+                            val imageLoader = remember(context) { AbyssImagePipeline.getLoader(context) }
                             AsyncImage(
                                 model = thumbRequest,
+                                imageLoader = imageLoader,
                                 contentDescription = media.title(),
                                 modifier = Modifier
                                     .width(48.dp)
@@ -307,8 +297,8 @@ fun MediaContextMenu(
                             }
                         )
 
-                        // 5. Open Details / Episodes (for Series)
-                        if (media.category == MediaCategory.SERIES) {
+                        // 5. Open Details / Episodes (for Series when primary action is Resume)
+                        if (media.category == MediaCategory.SERIES && historyEntry != null && historyEntry.positionMs > 15_000L && !isWatched) {
                             MediaContextMenuItem(
                                 label = stringResource(R.string.series_episodes_and_seasons),
                                 icon = AbyssIconType.TV_CHANNELS,
@@ -330,7 +320,6 @@ fun MediaContextMenu(
             }
         }
     }
-}
 
 @Composable
 private fun MediaContextMenuItem(

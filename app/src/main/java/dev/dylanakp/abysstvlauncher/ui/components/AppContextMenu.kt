@@ -38,8 +38,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -70,64 +70,52 @@ fun AppContextMenu(
 ) {
     if (app == null) return
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        val initialFocusRequester = remember { FocusRequester() }
-        var hasSeenFreshDown by remember(app.packageName) { mutableStateOf(false) }
+    val initialFocusRequester = remember { FocusRequester() }
+    var hasSeenFreshDown by remember(app.packageName) { mutableStateOf(false) }
 
-        LaunchedEffect(app) {
-            kotlinx.coroutines.delay(60L)
-            try { initialFocusRequester.requestFocus() } catch (_: Exception) {}
+    RequestModalInitialFocus(
+        focusRequester = initialFocusRequester,
+        app.packageName
+    )
+
+    AbyssModalOverlay(
+        scrimColor = Color(0xB305070C),
+        onDismiss = onDismiss,
+        modifier = Modifier.onPreviewKeyEvent { event ->
+            val native = event.nativeKeyEvent
+            val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                native.keyCode == KeyEvent.KEYCODE_ENTER ||
+                native.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+
+            if (isSelectKey) {
+                when (native.action) {
+                    KeyEvent.ACTION_DOWN -> {
+                        if (native.repeatCount == 0) {
+                            hasSeenFreshDown = true
+                            false
+                        } else {
+                            !hasSeenFreshDown
+                        }
+                    }
+                    KeyEvent.ACTION_UP -> {
+                        !hasSeenFreshDown
+                    }
+                    else -> false
+                }
+            } else {
+                false
+            }
         }
-
+    ) {
+        // Modal Sheet (Zero Outline)
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xB305070C))
-                .focusProperties { canFocus = false }
-                .onPreviewKeyEvent { event ->
-                    val native = event.nativeKeyEvent
-                    val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                        native.keyCode == KeyEvent.KEYCODE_ENTER ||
-                        native.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
-
-                    if (isSelectKey) {
-                        when (native.action) {
-                            KeyEvent.ACTION_DOWN -> {
-                                if (native.repeatCount == 0) {
-                                    hasSeenFreshDown = true
-                                    false
-                                } else {
-                                    !hasSeenFreshDown
-                                }
-                            }
-                            KeyEvent.ACTION_UP -> {
-                                !hasSeenFreshDown
-                            }
-                            else -> false
-                        }
-                    } else {
-                        false
-                    }
-                }
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismiss
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            // Modal Sheet (Zero Outline)
-            Box(
-                modifier = Modifier
-                    .width(380.dp)
-                    .clip(RoundedCornerShape(32.dp))
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color(0xFF1E2330),
+                .width(380.dp)
+                .clip(RoundedCornerShape(32.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF1E2330),
                                 Color(0xFF131620)
                             )
                         )
@@ -263,7 +251,6 @@ fun AppContextMenu(
             }
         }
     }
-}
 
 @Composable
 private fun ContextMenuItem(

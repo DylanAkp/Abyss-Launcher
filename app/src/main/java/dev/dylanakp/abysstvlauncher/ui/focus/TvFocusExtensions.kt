@@ -7,6 +7,9 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 
+fun FocusRequester.safeRequestFocus(): Boolean =
+    runCatching { requestFocus() }.getOrDefault(false)
+
 fun Modifier.dpadNavigation(
     up: FocusRequester? = null,
     down: FocusRequester? = null,

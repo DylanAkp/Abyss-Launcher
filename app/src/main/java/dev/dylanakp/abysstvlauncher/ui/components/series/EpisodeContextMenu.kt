@@ -39,10 +39,10 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
@@ -50,6 +50,8 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
+import dev.dylanakp.abysstvlauncher.ui.components.AbyssModalOverlay
+import dev.dylanakp.abysstvlauncher.ui.components.RequestModalInitialFocus
 import kotlinx.coroutines.delay
 
 @Composable
@@ -68,63 +70,46 @@ fun EpisodeContextMenu(
     val initialFocusRequester = remember { FocusRequester() }
     var hasSeenFreshDown by remember(episode.id) { mutableStateOf(false) }
 
-    LaunchedEffect(episode.id) {
-        delay(60L)
-        try { initialFocusRequester.requestFocus() } catch (_: Exception) {}
-    }
+    RequestModalInitialFocus(
+        focusRequester = initialFocusRequester,
+        episode.id
+    )
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xA6000000))
-                .focusProperties { canFocus = false }
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismiss
-                )
-                .onPreviewKeyEvent { event ->
-                    val native = event.nativeKeyEvent
-                    val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                        native.keyCode == KeyEvent.KEYCODE_ENTER ||
-                        native.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+    AbyssModalOverlay(
+        scrimColor = Color(0xA6000000),
+        onDismiss = onDismiss,
+        modifier = Modifier.onPreviewKeyEvent { event ->
+            val native = event.nativeKeyEvent
+            val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                native.keyCode == KeyEvent.KEYCODE_ENTER ||
+                native.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
 
-                    if (isSelectKey) {
-                        when (native.action) {
-                            KeyEvent.ACTION_DOWN -> {
-                                if (native.repeatCount == 0) {
-                                    hasSeenFreshDown = true
-                                    false
-                                } else {
-                                    !hasSeenFreshDown
-                                }
-                            }
-                            KeyEvent.ACTION_UP -> !hasSeenFreshDown
-                            else -> false
+            if (isSelectKey) {
+                when (native.action) {
+                    KeyEvent.ACTION_DOWN -> {
+                        if (native.repeatCount == 0) {
+                            hasSeenFreshDown = true
+                            false
+                        } else {
+                            !hasSeenFreshDown
                         }
-                    } else false
-                },
-            contentAlignment = Alignment.Center
+                    }
+                    KeyEvent.ACTION_UP -> !hasSeenFreshDown
+                    else -> false
+                }
+            } else false
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .width(440.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color(0xFF191C24))
+                .border(1.dp, Color(0x24FFFFFF), RoundedCornerShape(28.dp))
+                .pointerInput(Unit) { detectTapGestures { } }
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .width(440.dp)
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(Color(0xFF191C24))
-                    .border(1.dp, Color(0x24FFFFFF), RoundedCornerShape(28.dp))
-                    .focusProperties { canFocus = false }
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {}
-                    )
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
                 val epCode = "S${episode.seasonNumber.toString().padStart(2, '0')}E${episode.episodeNumber.toString().padStart(2, '0')}"
                 Box(
                     modifier = Modifier
@@ -203,7 +188,6 @@ fun EpisodeContextMenu(
             }
         }
     }
-}
 
 @Composable
 private fun EpisodeContextMenuItem(

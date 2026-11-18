@@ -33,10 +33,11 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,42 +63,28 @@ fun MediaDetailModal(
 ) {
     if (item == null) return
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    val primaryButtonRequester = remember { FocusRequester() }
+
+    RequestModalInitialFocus(
+        focusRequester = primaryButtonRequester,
+        item
+    )
+
+    val isAvailable = item.streamUrl.isNotBlank() || item.jellyfinId.isNotBlank() || (isSeerConfigured && item.seerStatus == SeerMediaStatus.AVAILABLE)
+    val canRequest = isSeerConfigured && !isAvailable && item.tmdbId != null && item.seerStatus != SeerMediaStatus.PROCESSING && item.seerStatus != SeerMediaStatus.PENDING_APPROVAL
+
+    AbyssModalOverlay(
+        scrimColor = Color(0xCC000000),
+        onDismiss = onDismiss
     ) {
-        val primaryButtonRequester = remember { FocusRequester() }
-
-        LaunchedEffect(item) {
-            delay(100)
-            try {
-                primaryButtonRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
-
-        val isAvailable = item.streamUrl.isNotBlank() || item.jellyfinId.isNotBlank() || (isSeerConfigured && item.seerStatus == SeerMediaStatus.AVAILABLE)
-        val canRequest = isSeerConfigured && !isAvailable && item.tmdbId != null && item.seerStatus != SeerMediaStatus.PROCESSING && item.seerStatus != SeerMediaStatus.PENDING_APPROVAL
-
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xCC000000))
-                .focusProperties { canFocus = false }
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismiss
-                ),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth(0.68f)
+                .fillMaxHeight(0.72f)
+                .clip(RoundedCornerShape(20.dp))
+                .background(AbyssSurfaceGlassElevated)
+                .pointerInput(Unit) { detectTapGestures { } }
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.68f)
-                    .fillMaxHeight(0.72f)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(AbyssSurfaceGlassElevated)
-                    .clickable(enabled = false) {}
-            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
@@ -336,11 +323,12 @@ fun MediaDetailModal(
                                 )
                             }
 
+                            val hasPrimaryAction = isAvailable || (canRequest && onRequestOnSeer != null)
                             ModalActionButton(
                                 label = stringResource(R.string.details_close),
                                 icon = AbyssIconType.ARROW_LEFT,
-                                isPrimary = !isAvailable && !canRequest,
-                                focusRequester = if (!isAvailable && !canRequest) primaryButtonRequester else null,
+                                isPrimary = !hasPrimaryAction,
+                                focusRequester = if (!hasPrimaryAction) primaryButtonRequester else null,
                                 onClick = onDismiss
                             )
                         }
@@ -349,7 +337,6 @@ fun MediaDetailModal(
             }
         }
     }
-}
 
 @Composable
 private fun ModalActionButton(
@@ -364,7 +351,11 @@ private fun ModalActionButton(
     Box(
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .scale(if (isFocused) 1.05f else 1f)
+            .graphicsLayer {
+                val s = if (isFocused) 1.05f else 1f
+                scaleX = s
+                scaleY = s
+            }
             .clip(RoundedCornerShape(50))
             .background(
                 when {

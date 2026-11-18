@@ -10,6 +10,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,13 +40,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -70,33 +71,29 @@ fun AppUpdateModal(
 ) {
     if (update == null) return
 
-    Dialog(
-        onDismissRequest = { if (!isDownloading) onDismiss() },
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    val primaryButtonRequester = remember { FocusRequester() }
+
+    RequestModalInitialFocus(
+        focusRequester = primaryButtonRequester,
+        update,
+        isDownloading,
+        errorMessage,
+        enabled = !isDownloading
+    )
+
+    AbyssModalOverlay(
+        scrimColor = Color(0xD905060A),
+        onDismiss = onDismiss,
+        dismissOnBack = !isDownloading,
+        dismissOnScrimClick = !isDownloading
     ) {
-        val primaryButtonRequester = remember { FocusRequester() }
-
-        LaunchedEffect(update, isDownloading, errorMessage) {
-            delay(120)
-            try {
-                primaryButtonRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
-
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xD905060A))
-                .focusProperties { canFocus = false },
-            contentAlignment = Alignment.Center
+                .width(540.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(AbyssSurfaceGlassElevated)
+                .padding(28.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .width(540.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(AbyssSurfaceGlassElevated)
-                    .padding(28.dp)
-            ) {
                 Column(
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -252,7 +249,6 @@ fun AppUpdateModal(
             }
         }
     }
-}
 
 @Composable
 private fun UpdateModalButton(
@@ -269,7 +265,11 @@ private fun UpdateModalButton(
     Box(
         modifier = modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .scale(if (isFocused) 1.04f else 1f)
+            .graphicsLayer {
+                val s = if (isFocused) 1.04f else 1f
+                scaleX = s
+                scaleY = s
+            }
             .clip(RoundedCornerShape(12.dp))
             .background(
                 when {
@@ -289,6 +289,7 @@ private fun UpdateModalButton(
                     true
                 } else false
             }
+            .focusable(enabled = enabled)
             .clickable(enabled = enabled) { onClick() }
             .padding(vertical = 12.dp, horizontal = 16.dp),
         contentAlignment = Alignment.Center
