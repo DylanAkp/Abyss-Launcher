@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
+import android.util.Log
 import dev.dylanakp.abysstvlauncher.model.TvAppInfo
 import dev.dylanakp.abysstvlauncher.ui.components.prewarmAppBitmaps
 import kotlinx.coroutines.Dispatchers
@@ -50,7 +51,8 @@ object AppRepository {
         for ((pkg, resolveInfo) in combinedMap) {
             val rawLabel = try {
                 resolveInfo.loadLabel(pm).toString().ifBlank { pkg }
-            } catch (_: Exception) {
+            } catch (e: RuntimeException) {
+                Log.w("AppRepository", "Failed to load label for $pkg", e)
                 pkg
             }
             val label = if (pkg == "io.gh.reisxd.tizentube.cobalt" || pkg.contains("tizentube", ignoreCase = true)) {
@@ -65,12 +67,17 @@ object AppRepository {
                 } else {
                     null
                 }
-            } catch (_: Exception) {
+            } catch (e: PackageManager.NameNotFoundException) {
+                Log.w("AppRepository", "Banner package not found for $pkg", e)
+                null
+            } catch (e: RuntimeException) {
+                Log.w("AppRepository", "Failed to load banner for $pkg", e)
                 null
             }
             val icon = try {
                 resolveInfo.loadIcon(pm)
-            } catch (_: Exception) {
+            } catch (e: RuntimeException) {
+                Log.w("AppRepository", "Failed to load icon for $pkg", e)
                 null
             }
             val pinIndex = pinnedPackages.indexOf(pkg)

@@ -11,6 +11,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -38,21 +40,19 @@ private data class GitHubAssetDto(
     val size: Long = 0L
 )
 
-object AppUpdateRepository {
+object AppUpdateRepository : KoinComponent {
 
     private const val REPO_OWNER = "DylanAkp"
     private const val REPO_NAME = "Abyss-Launcher"
     private const val LATEST_RELEASE_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
+    private val json: Json by inject()
+    private val baseClient: OkHttpClient by inject()
+    private val client: OkHttpClient by lazy {
+        baseClient.newBuilder()
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
     }
-
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
 
     fun parseVersionCode(version: String): Int {
         val clean = version.trim().removePrefix("v").removePrefix("V")
@@ -75,16 +75,17 @@ object AppUpdateRepository {
                 .header("User-Agent", "Abyss-TV-Launcher")
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                if (response.code == 404) return@runCatching null
-                throw IOException("GitHub API error: ${response.code}")
+            val release = client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    if (response.code == 404) return@runCatching null
+                    throw IOException("GitHub API error: ${response.code}")
+                }
+
+                val body = response.body?.string().orEmpty()
+                if (body.isBlank()) return@runCatching null
+
+                json.decodeFromString<GitHubReleaseDto>(body)
             }
-
-            val body = response.body?.string().orEmpty()
-            if (body.isBlank()) return@runCatching null
-
-            val release = json.decodeFromString<GitHubReleaseDto>(body)
             val tagName = release.tagName.trim()
             if (tagName.isBlank()) return@runCatching null
 
@@ -125,35 +126,86 @@ object AppUpdateRepository {
                 .header("User-Agent", "Abyss-TV-Launcher")
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) throw IOException("Failed to download APK: ${response.code}")
-
-            val body = response.body ?: throw IOException("Empty response body")
-            val totalBytes = body.contentLength()
             val apkFile = File(context.cacheDir, "abyss_update.apk")
             if (apkFile.exists()) apkFile.delete()
 
-            body.byteStream().use { input ->
-                FileOutputStream(apkFile).use { output ->
-                    val buffer = ByteArray(8 * 1024)
-                    var read: Int
-                    var bytesRead = 0L
-                    while (input.read(buffer).also { read = it } != -1) {
-                        output.write(buffer, 0, read)
-                        bytesRead += read
-                        if (totalBytes > 0) {
-                            onProgress(bytesRead.toFloat() / totalBytes.toFloat())
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw IOException("Failed to download APK: ${response.code}")
+
+                val body = response.body ?: throw IOException("Empty response body")
+                val totalBytes = body.contentLength()
+
+                body.byteStream().use { input ->
+                    FileOutputStream(apkFile).use { output ->
+                        val buffer = ByteArray(8 * 1024)
+                        var read: Int
+                        var bytesRead = 0L
+                        var lastPercent = -1
+                        while (input.read(buffer).also { read = it } != -1) {
+                            output.write(buffer, 0, read)
+                            bytesRead += read
+                            if (totalBytes > 0) {
+                                val progress = bytesRead.toFloat() / totalBytes.toFloat()
+                                val pct = (progress * 100).toInt()
+                                if (pct != lastPercent) {
+                                    lastPercent = pct
+                                    onProgress(progress)
+                                }
+                            }
                         }
+                        output.flush()
                     }
-                    output.flush()
                 }
+            }
+            if (!verifyApkSignature(context, apkFile)) {
+                apkFile.delete()
+                throw SecurityException("Downloaded APK signature does not match installed app")
             }
             apkFile
         }
     }
 
+    private fun verifyApkSignature(context: Context, apkFile: File): Boolean {
+        val pm = context.packageManager
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            val installedInfo = pm.getPackageInfo(
+                context.packageName,
+                android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+            )
+            val archiveInfo = pm.getPackageArchiveInfo(
+                apkFile.absolutePath,
+                android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+            ) ?: return false
+            if (archiveInfo.packageName != context.packageName) return false
+            val installedSigs = installedInfo.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet() ?: return false
+            val archiveSigs = archiveInfo.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet() ?: return false
+            installedSigs.isNotEmpty() && installedSigs == archiveSigs
+        } else {
+            @Suppress("DEPRECATION")
+            val installedInfo = pm.getPackageInfo(
+                context.packageName,
+                android.content.pm.PackageManager.GET_SIGNATURES
+            )
+            @Suppress("DEPRECATION")
+            val archiveInfo = pm.getPackageArchiveInfo(
+                apkFile.absolutePath,
+                android.content.pm.PackageManager.GET_SIGNATURES
+            ) ?: return false
+            if (archiveInfo.packageName != context.packageName) return false
+            @Suppress("DEPRECATION")
+            val installedSigs = installedInfo.signatures?.map { it.toCharsString() }?.toSet() ?: return false
+            @Suppress("DEPRECATION")
+            val archiveSigs = archiveInfo.signatures?.map { it.toCharsString() }?.toSet() ?: return false
+            installedSigs.isNotEmpty() && installedSigs == archiveSigs
+        }
+    }
+
     fun triggerInstall(context: Context, apkFile: File): Result<Unit> {
         return runCatching {
+            if (!verifyApkSignature(context, apkFile)) {
+                apkFile.delete()
+                throw SecurityException("APK signature verification failed")
+            }
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 if (!context.packageManager.canRequestPackageInstalls()) {
                     val settingsIntent = Intent(
@@ -163,6 +215,7 @@ object AppUpdateRepository {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     }
                     context.startActivity(settingsIntent)
+                    return@runCatching
                 }
             }
 

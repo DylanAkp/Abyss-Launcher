@@ -1,10 +1,12 @@
 package dev.dylanakp.abysstvlauncher.data
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import android.util.Log
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.PlayerPreference
 
@@ -22,7 +24,10 @@ object SystemAppHelper {
         return try {
             pm.getPackageInfo(packageName, 0)
             true
-        } catch (_: Exception) {
+        } catch (_: PackageManager.NameNotFoundException) {
+            false
+        } catch (e: RuntimeException) {
+            Log.w("SystemAppHelper", "Package check failed for $packageName", e)
             false
         }
     }
@@ -33,6 +38,8 @@ object SystemAppHelper {
         preference: PlayerPreference
     ): Boolean {
         val streamUrl = item.streamUrl.trim()
+            .replace(Regex("([?&])api_key=[^&]*&?"), "$1")
+            .trimEnd('&', '?')
         if (streamUrl.isBlank()) return false
         val uri = Uri.parse(streamUrl)
 
@@ -48,7 +55,11 @@ object SystemAppHelper {
                     try {
                         context.startActivity(extIntent)
                         return true
-                    } catch (_: Exception) {}
+                    } catch (e: ActivityNotFoundException) {
+                        Log.w("SystemAppHelper", "External player activity not found: $pkg", e)
+                    } catch (e: SecurityException) {
+                        Log.w("SystemAppHelper", "External player launch denied: $pkg", e)
+                    }
                 }
             }
         }
@@ -68,7 +79,11 @@ object SystemAppHelper {
                 context.startActivity(genericView)
             }
             true
-        } catch (_: Exception) {
+        } catch (e: ActivityNotFoundException) {
+            Log.w("SystemAppHelper", "No activity found for external media intent", e)
+            false
+        } catch (e: SecurityException) {
+            Log.w("SystemAppHelper", "Security error launching external media intent", e)
             false
         }
     }
@@ -82,7 +97,11 @@ object SystemAppHelper {
         return try {
             context.startActivity(intent)
             true
-        } catch (_: Exception) {
+        } catch (e: ActivityNotFoundException) {
+            Log.w("SystemAppHelper", "No activity found for external media intent", e)
+            false
+        } catch (e: SecurityException) {
+            Log.w("SystemAppHelper", "Security error launching external media intent", e)
             false
         }
     }
@@ -133,7 +152,11 @@ object SystemAppHelper {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
             true
-        } catch (_: Exception) {
+        } catch (e: ActivityNotFoundException) {
+            Log.w("SystemAppHelper", "No activity found for external media intent", e)
+            false
+        } catch (e: SecurityException) {
+            Log.w("SystemAppHelper", "Security error launching external media intent", e)
             false
         }
     }

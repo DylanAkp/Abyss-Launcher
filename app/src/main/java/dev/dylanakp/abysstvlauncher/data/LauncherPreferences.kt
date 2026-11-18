@@ -39,6 +39,10 @@ class LauncherPreferences(private val context: Context) {
     private val dataStore = context.applicationContext.launcherDataStore
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val memoryPrefs = java.util.concurrent.atomic.AtomicReference<Preferences>(emptyPreferences())
+    private val loadComplete = kotlinx.coroutines.CompletableDeferred<Unit>()
+    private val writeChannel = kotlinx.coroutines.channels.Channel<(androidx.datastore.preferences.core.MutablePreferences) -> Unit>(
+        kotlinx.coroutines.channels.Channel.UNLIMITED
+    )
 
     val dataFlow: Flow<Preferences> = dataStore.data
         .catch { exception ->
@@ -50,61 +54,70 @@ class LauncherPreferences(private val context: Context) {
         }
 
     init {
-        val legacyPrefs = context.applicationContext.getSharedPreferences("abyss_tv_prefs", Context.MODE_PRIVATE)
-        val initialMap = mutableMapOf<Preferences.Key<*>, Any>()
-        legacyPrefs.getString("language", null)?.let { initialMap[KEY_LANGUAGE] = it }
-        legacyPrefs.getString("accent_preset", null)?.let { initialMap[KEY_ACCENT_PRESET] = it }
-        if (legacyPrefs.contains("auto_rotate_hero")) initialMap[KEY_AUTO_ROTATE_HERO] = legacyPrefs.getBoolean("auto_rotate_hero", true)
-        if (legacyPrefs.contains("show_hidden_apps")) initialMap[KEY_SHOW_HIDDEN_APPS] = legacyPrefs.getBoolean("show_hidden_apps", false)
-        legacyPrefs.getString("jf_server", null)?.let { initialMap[KEY_JF_SERVER] = it }
-        legacyPrefs.getString("jf_user", null)?.let { initialMap[KEY_JF_USER] = it }
-        legacyPrefs.getString("jf_pass", null)?.let { initialMap[KEY_JF_PASS] = it }
-        legacyPrefs.getString("jf_user_id", null)?.let { initialMap[KEY_JF_USER_ID] = it }
-        legacyPrefs.getString("jf_token", null)?.let { initialMap[KEY_JF_TOKEN] = it }
-        legacyPrefs.getString("jf_server_name", null)?.let { initialMap[KEY_JF_SERVER_NAME] = it }
-        legacyPrefs.getString("jf_player_pref", null)?.let { initialMap[KEY_JF_PLAYER_PREF] = it }
-        if (legacyPrefs.contains("jf_last_sync")) initialMap[KEY_JF_LAST_SYNC] = legacyPrefs.getLong("jf_last_sync", 0L)
-        if (legacyPrefs.contains("jf_movies_count")) initialMap[KEY_JF_MOVIES_COUNT] = legacyPrefs.getInt("jf_movies_count", 0)
-        if (legacyPrefs.contains("jf_series_count")) initialMap[KEY_JF_SERIES_COUNT] = legacyPrefs.getInt("jf_series_count", 0)
-        legacyPrefs.getString("seer_server", null)?.let { initialMap[KEY_SEER_SERVER] = it }
-        legacyPrefs.getString("seer_key", null)?.let { initialMap[KEY_SEER_KEY] = it }
-        if (legacyPrefs.contains("seer_last_sync")) initialMap[KEY_SEER_LAST_SYNC] = legacyPrefs.getLong("seer_last_sync", 0L)
-        if (legacyPrefs.contains("seer_req_count")) initialMap[KEY_SEER_REQ_COUNT] = legacyPrefs.getInt("seer_req_count", 0)
-        legacyPrefs.getString("pinned_packages", null)?.let { initialMap[KEY_PINNED_PACKAGES] = it }
-        legacyPrefs.getStringSet("hidden_packages", null)?.let { initialMap[KEY_HIDDEN_PACKAGES] = it }
-        legacyPrefs.getStringSet("watchlist_ids", null)?.let { initialMap[KEY_WATCHLIST_IDS] = it }
-        legacyPrefs.getString("weather_city", null)?.let { initialMap[KEY_WEATHER_CITY] = it }
-        legacyPrefs.getString("temp_unit", null)?.let { initialMap[KEY_TEMP_UNIT] = it }
-        legacyPrefs.getString("search_history", null)?.let { initialMap[KEY_SEARCH_HISTORY] = it }
-
-        if (initialMap.isNotEmpty()) {
-            memoryPrefs.set(androidx.datastore.preferences.core.emptyPreferences().toPreferences().let {
-                val mut = it.toMutablePreferences()
-                initialMap.forEach { (k, v) ->
-                    @Suppress("UNCHECKED_CAST")
-                    mut[k as Preferences.Key<Any>] = v
-                }
-                mut.toPreferences()
-            })
-        }
-
         scope.launch {
-            dataFlow.collect { prefs ->
-                memoryPrefs.set(prefs)
+            try {
+                migrateLegacyPrefsIfNeeded()
+                dataFlow.collect { prefs ->
+                    memoryPrefs.set(prefs)
+                    loadComplete.complete(Unit)
+                }
+            } finally {
+                loadComplete.complete(Unit)
             }
         }
+        scope.launch {
+            for (mutation in writeChannel) {
+                dataStore.edit { mutation(it) }
+            }
+        }
+    }
+
+    suspend fun awaitLoaded() {
+        loadComplete.await()
+    }
+
+    private suspend fun migrateLegacyPrefsIfNeeded() {
+        val legacyPrefs = context.applicationContext.getSharedPreferences("abyss_tv_prefs", Context.MODE_PRIVATE)
+        if (legacyPrefs.all.isEmpty()) return
+
+        dataStore.edit { mut ->
+            if (mut.asMap().isNotEmpty()) return@edit
+            legacyPrefs.getString("language", null)?.let { mut[KEY_LANGUAGE] = it }
+            legacyPrefs.getString("accent_preset", null)?.let { mut[KEY_ACCENT_PRESET] = it }
+            if (legacyPrefs.contains("auto_rotate_hero")) mut[KEY_AUTO_ROTATE_HERO] = legacyPrefs.getBoolean("auto_rotate_hero", true)
+            if (legacyPrefs.contains("show_hidden_apps")) mut[KEY_SHOW_HIDDEN_APPS] = legacyPrefs.getBoolean("show_hidden_apps", false)
+            legacyPrefs.getString("jf_server", null)?.let { mut[KEY_JF_SERVER] = it }
+            legacyPrefs.getString("jf_user", null)?.let { mut[KEY_JF_USER] = it }
+            legacyPrefs.getString("jf_user_id", null)?.let { mut[KEY_JF_USER_ID] = it }
+            legacyPrefs.getString("jf_token", null)?.let { mut[KEY_JF_TOKEN] = SecureTokenStorage.encrypt(it) }
+            legacyPrefs.getString("jf_server_name", null)?.let { mut[KEY_JF_SERVER_NAME] = it }
+            legacyPrefs.getString("jf_player_pref", null)?.let { mut[KEY_JF_PLAYER_PREF] = it }
+            if (legacyPrefs.contains("jf_last_sync")) mut[KEY_JF_LAST_SYNC] = legacyPrefs.getLong("jf_last_sync", 0L)
+            if (legacyPrefs.contains("jf_movies_count")) mut[KEY_JF_MOVIES_COUNT] = legacyPrefs.getInt("jf_movies_count", 0)
+            if (legacyPrefs.contains("jf_series_count")) mut[KEY_JF_SERIES_COUNT] = legacyPrefs.getInt("jf_series_count", 0)
+            legacyPrefs.getString("seer_server", null)?.let { mut[KEY_SEER_SERVER] = it }
+            legacyPrefs.getString("seer_key", null)?.let { mut[KEY_SEER_KEY] = SecureTokenStorage.encrypt(it) }
+            if (legacyPrefs.contains("seer_last_sync")) mut[KEY_SEER_LAST_SYNC] = legacyPrefs.getLong("seer_last_sync", 0L)
+            if (legacyPrefs.contains("seer_req_count")) mut[KEY_SEER_REQ_COUNT] = legacyPrefs.getInt("seer_req_count", 0)
+            legacyPrefs.getString("pinned_packages", null)?.let { mut[KEY_PINNED_PACKAGES] = it }
+            legacyPrefs.getStringSet("hidden_packages", null)?.let { mut[KEY_HIDDEN_PACKAGES] = it }
+            legacyPrefs.getStringSet("watchlist_ids", null)?.let { mut[KEY_WATCHLIST_IDS] = it }
+            legacyPrefs.getString("weather_city", null)?.let { mut[KEY_WEATHER_CITY] = it }
+            legacyPrefs.getString("temp_unit", null)?.let { mut[KEY_TEMP_UNIT] = it }
+            legacyPrefs.getString("search_history", null)?.let { mut[KEY_SEARCH_HISTORY] = it }
+        }
+        legacyPrefs.edit().clear().apply()
     }
 
     private inline fun <T> read(crossinline block: (Preferences) -> T): T {
         return block(memoryPrefs.get())
     }
 
-    private fun mutate(block: (MutablePreferences: androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
-        val updated = memoryPrefs.get().toMutablePreferences().apply(block).toPreferences()
-        memoryPrefs.set(updated)
-        scope.launch {
-            dataStore.edit { block(it) }
+    private fun mutate(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
+        memoryPrefs.updateAndGet { current ->
+            current.toMutablePreferences().apply(block).toPreferences()
         }
+        writeChannel.trySend(block)
     }
 
     var language: AppLanguage
@@ -135,14 +148,13 @@ class LauncherPreferences(private val context: Context) {
             val defaultPass = BuildConfig.DEFAULT_JELLYFIN_PASS
             val srv = prefs[KEY_JF_SERVER]?.ifBlank { null } ?: defaultSrv
             val user = prefs[KEY_JF_USER]?.ifBlank { null } ?: defaultUser
-            val pass = prefs[KEY_JF_PASS]?.ifBlank { null } ?: defaultPass
 
             JellyfinConfig(
                 serverUrl = srv,
                 username = user,
-                password = pass,
+                password = defaultPass,
                 userId = prefs[KEY_JF_USER_ID] ?: "",
-                accessToken = prefs[KEY_JF_TOKEN] ?: "",
+                accessToken = SecureTokenStorage.decrypt(prefs[KEY_JF_TOKEN] ?: ""),
                 serverName = prefs[KEY_JF_SERVER_NAME] ?: "Jellyfin",
                 playerPreference = PlayerPreference.fromId(
                     prefs[KEY_JF_PLAYER_PREF] ?: PlayerPreference.ABYSS_INTERNAL.id
@@ -155,9 +167,9 @@ class LauncherPreferences(private val context: Context) {
         set(value) = mutate { prefs ->
             prefs[KEY_JF_SERVER] = value.serverUrl
             prefs[KEY_JF_USER] = value.username
-            prefs[KEY_JF_PASS] = value.password
+            prefs.remove(KEY_JF_PASS)
             prefs[KEY_JF_USER_ID] = value.userId
-            prefs[KEY_JF_TOKEN] = value.accessToken
+            prefs[KEY_JF_TOKEN] = SecureTokenStorage.encrypt(value.accessToken)
             prefs[KEY_JF_SERVER_NAME] = value.serverName
             prefs[KEY_JF_PLAYER_PREF] = value.playerPreference.id
             prefs[KEY_JF_LAST_SYNC] = value.lastSyncTimestamp
@@ -170,7 +182,7 @@ class LauncherPreferences(private val context: Context) {
             val defaultSrv = BuildConfig.DEFAULT_SEER_SERVER
             val defaultKey = BuildConfig.DEFAULT_SEER_API_KEY
             val srv = prefs[KEY_SEER_SERVER]?.ifBlank { null } ?: defaultSrv
-            val key = prefs[KEY_SEER_KEY]?.ifBlank { null } ?: defaultKey
+            val key = SecureTokenStorage.decrypt(prefs[KEY_SEER_KEY] ?: "").ifBlank { null } ?: defaultKey
 
             SeerConfig(
                 serverUrl = srv,
@@ -181,7 +193,7 @@ class LauncherPreferences(private val context: Context) {
         }
         set(value) = mutate { prefs ->
             prefs[KEY_SEER_SERVER] = value.serverUrl
-            prefs[KEY_SEER_KEY] = value.apiKey
+            prefs[KEY_SEER_KEY] = SecureTokenStorage.encrypt(value.apiKey)
             prefs[KEY_SEER_LAST_SYNC] = value.lastSyncTimestamp
             prefs[KEY_SEER_REQ_COUNT] = value.requestedCount
         }
@@ -240,12 +252,21 @@ class LauncherPreferences(private val context: Context) {
     var remotePairingPin: String
         get() = read { prefs ->
             prefs[KEY_REMOTE_PIN]?.takeIf { it.length == 6 } ?: run {
-                val generated = (100000..999999).random().toString()
+                val generated = dev.dylanakp.abysstvlauncher.remote.RemotePairingAndKeyHelper.generatePin()
                 mutate { it[KEY_REMOTE_PIN] = generated }
                 generated
             }
         }
         set(value) = mutate { prefs -> prefs[KEY_REMOTE_PIN] = value }
+
+    val deviceId: String
+        get() = read { prefs ->
+            prefs[KEY_DEVICE_ID]?.takeIf { it.isNotBlank() } ?: run {
+                val generated = java.util.UUID.randomUUID().toString()
+                mutate { it[KEY_DEVICE_ID] = generated }
+                generated
+            }
+        }
 
     var remotePairedTokens: Set<String>
         get() = read { prefs -> prefs[KEY_REMOTE_TOKENS] ?: emptySet() }
@@ -282,5 +303,6 @@ class LauncherPreferences(private val context: Context) {
         private val KEY_REMOTE_ENABLED = booleanPreferencesKey("remote_enabled")
         private val KEY_REMOTE_PIN = stringPreferencesKey("remote_pin")
         private val KEY_REMOTE_TOKENS = stringSetPreferencesKey("remote_tokens")
+        private val KEY_DEVICE_ID = stringPreferencesKey("device_id")
     }
 }

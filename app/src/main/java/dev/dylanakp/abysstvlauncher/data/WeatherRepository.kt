@@ -3,7 +3,10 @@ package dev.dylanakp.abysstvlauncher.data
 import android.util.Log
 import dev.dylanakp.abysstvlauncher.domain.repository.WeatherRepository as IWeatherRepository
 import dev.dylanakp.abysstvlauncher.model.TemperatureUnit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -89,8 +92,13 @@ object WeatherRepository : IWeatherRepository, KoinComponent {
     private val client: OkHttpClient by inject()
     private val json: Json by inject()
 
+    private val cacheMutex = Mutex()
+
+    @Volatile
     private var cachedInfo: WeatherInfo? = null
+    @Volatile
     private var lastFetchTime = 0L
+    @Volatile
     private var cachedCity = ""
 
     override fun clearCache() {
@@ -100,9 +108,11 @@ object WeatherRepository : IWeatherRepository, KoinComponent {
     }
 
     override suspend fun getWeather(cityName: String): WeatherInfo? = withContext(Dispatchers.IO) {
-        val now = System.currentTimeMillis()
-        if (cachedInfo != null && cachedCity.equals(cityName, ignoreCase = true) && (now - lastFetchTime < 30 * 60 * 1000L)) {
-            return@withContext cachedInfo
+        cacheMutex.withLock {
+            val now = System.currentTimeMillis()
+            if (cachedInfo != null && cachedCity.equals(cityName, ignoreCase = true) && (now - lastFetchTime < 30 * 60 * 1000L)) {
+                return@withContext cachedInfo
+            }
         }
 
         try {
@@ -113,9 +123,10 @@ object WeatherRepository : IWeatherRepository, KoinComponent {
                 .url(geoUrl)
                 .header("User-Agent", "AbyssLauncher/2.0")
                 .build()
-            val geoResp = client.newCall(geoReq).execute()
-            if (!geoResp.isSuccessful) return@withContext cachedInfo
-            val geoBody = geoResp.body?.string() ?: return@withContext cachedInfo
+            val geoBody = client.newCall(geoReq).execute().use { geoResp ->
+                if (!geoResp.isSuccessful) return@withContext cachedInfo
+                geoResp.body?.string() ?: return@withContext cachedInfo
+            }
             val geoData = json.decodeFromString<GeocodingResponse>(geoBody)
             val first = geoData.results.firstOrNull() ?: return@withContext cachedInfo
 
@@ -124,9 +135,10 @@ object WeatherRepository : IWeatherRepository, KoinComponent {
                 .url(weatherUrl)
                 .header("User-Agent", "AbyssLauncher/2.0")
                 .build()
-            val weatherResp = client.newCall(weatherReq).execute()
-            if (!weatherResp.isSuccessful) return@withContext cachedInfo
-            val weatherBody = weatherResp.body?.string() ?: return@withContext cachedInfo
+            val weatherBody = client.newCall(weatherReq).execute().use { weatherResp ->
+                if (!weatherResp.isSuccessful) return@withContext cachedInfo
+                weatherResp.body?.string() ?: return@withContext cachedInfo
+            }
             val weatherData = json.decodeFromString<WeatherResponse>(weatherBody)
             val current = weatherData.current ?: return@withContext cachedInfo
 
@@ -137,10 +149,14 @@ object WeatherRepository : IWeatherRepository, KoinComponent {
                 iconEmoji = weatherCodeToEmoji(current.weatherCode),
                 cityName = first.name.ifBlank { cityName }
             )
-            cachedInfo = info
-            cachedCity = cityName
-            lastFetchTime = now
+            cacheMutex.withLock {
+                cachedInfo = info
+                cachedCity = cityName
+                lastFetchTime = System.currentTimeMillis()
+            }
             info
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w("AbyssWeather", "Weather fetch error: ${e.message}")
             cachedInfo

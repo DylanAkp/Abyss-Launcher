@@ -9,6 +9,6 @@ object PreferIpv4Dns : Dns {
         val addresses = Dns.SYSTEM.lookup(hostname)
         val v4 = addresses.filterIsInstance<Inet4Address>()
         val v6 = addresses.filter { it !is Inet4Address }
-        return if (v4.isNotEmpty()) v4 else addresses
+        return if (v4.isNotEmpty()) v4 + v6 else addresses
     }
 }

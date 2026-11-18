@@ -1,5 +1,6 @@
 package dev.dylanakp.abysstvlauncher.data
 
+import android.util.Log
 import dev.dylanakp.abysstvlauncher.BuildConfig
 import dev.dylanakp.abysstvlauncher.domain.repository.TmdbRepository as ITmdbRepository
 import dev.dylanakp.abysstvlauncher.model.MediaCategory
@@ -7,16 +8,22 @@ import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.SeriesDetails
 import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
 import dev.dylanakp.abysstvlauncher.model.SeriesSeason
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStreamReader
 import java.net.URL
 import java.text.Normalizer
@@ -89,28 +96,31 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
     private const val IMG_W1280 = "https://image.tmdb.org/t/p/w1280"
     private const val IMG_W780 = "https://image.tmdb.org/t/p/w780"
 
+    private val RE_DIACRITICS = Regex("\\p{InCombiningDiacriticalMarks}+")
+    private val RE_ROMAN_II = Regex("\\bii\\b")
+    private val RE_ROMAN_III = Regex("\\biii\\b")
+    private val RE_ROMAN_IV = Regex("\\biv\\b")
+    private val RE_YEAR_PARENS = Regex("[(\\[]\\s*\\d{4}\\s*[)\\]]")
+    private val RE_PREFIX_TAGS = Regex("^(fr|vf|vostfr|vost|stfr|multi|vff|vo|fhd|uhd|4k|hevc)\\s*[-:|/]\\s*")
+    private val RE_WORD_TAGS = Regex("\\b(fr|vf|vostfr|vost|stfr|multi|vff|vo|fhd|uhd|4k|hevc|1080p|720p|top 100|nouveautes|nouveaute)\\b")
+    private val RE_NON_ALNUM = Regex("[^a-z0-9]")
+    private val RE_WHITESPACE = Regex("\\s+")
+
     override fun cleanTitleForMatching(raw: String): String {
         var t = Normalizer.normalize(raw, Normalizer.Form.NFD)
-            .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+            .replace(RE_DIACRITICS, "")
             .lowercase(Locale.ROOT)
             .trim()
 
-        // Strip roman numerals
-        t = t.replace(Regex("\\bii\\b"), "2")
-            .replace(Regex("\\biii\\b"), "3")
-            .replace(Regex("\\biv\\b"), "4")
+        t = t.replace(RE_ROMAN_II, "2")
+            .replace(RE_ROMAN_III, "3")
+            .replace(RE_ROMAN_IV, "4")
+            .replace(RE_YEAR_PARENS, " ")
+            .replace(RE_PREFIX_TAGS, " ")
+            .replace(RE_WORD_TAGS, " ")
+            .replace(RE_NON_ALNUM, " ")
 
-        // Strip year in parens or brackets: (2024), [2023]
-        t = t.replace(Regex("[(\\[]\\s*\\d{4}\\s*[)\\]]"), " ")
-
-        // Strip common release and quality tags
-        t = t.replace(Regex("^(fr|vf|vostfr|vost|stfr|multi|vff|vo|fhd|uhd|4k|hevc)\\s*[-:|/]\\s*"), " ")
-        t = t.replace(Regex("\\b(fr|vf|vostfr|vost|stfr|multi|vff|vo|fhd|uhd|4k|hevc|1080p|720p|top 100|nouveautes|nouveaute)\\b"), " ")
-
-        // Keep alphanumeric
-        t = t.replace(Regex("[^a-z0-9]"), " ")
-
-        return t.replace(Regex("\\s+"), " ").trim()
+        return t.replace(RE_WHITESPACE, " ").trim()
     }
 
     override fun titlesMatchSafely(titleA: String, titleB: String): Boolean {
@@ -151,20 +161,52 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
         parseTmdbResults(raw, forcedCategory = MediaCategory.SERIES)
     }
 
+    private class PoolIndex(pool: List<MediaItem>) {
+        val byTmdbId = HashMap<Int, MediaItem>(pool.size)
+        val byCleanTitle = HashMap<String, MediaItem>(pool.size)
+        val byCompactTitle = HashMap<String, MediaItem>(pool.size)
+        val cleanEntries = ArrayList<Pair<String, MediaItem>>(pool.size)
+
+        init {
+            for (jf in pool) {
+                jf.tmdbId?.let { byTmdbId.putIfAbsent(it, jf) }
+                val clean = cleanTitleForMatching(jf.title)
+                if (clean.isNotBlank()) {
+                    byCleanTitle.putIfAbsent(clean, jf)
+                    byCompactTitle.putIfAbsent(clean.replace(" ", ""), jf)
+                    cleanEntries.add(clean to jf)
+                }
+            }
+        }
+
+        fun findMatch(item: MediaItem): MediaItem? {
+            item.tmdbId?.let { id -> byTmdbId[id]?.let { return it } }
+            val clean = cleanTitleForMatching(item.title)
+            if (clean.isBlank()) return null
+            byCleanTitle[clean]?.let { return it }
+            byCompactTitle[clean.replace(" ", "")]?.let { return it }
+            for ((jfClean, jf) in cleanEntries) {
+                val shorter = if (clean.length <= jfClean.length) clean else jfClean
+                val longer = if (clean.length <= jfClean.length) jfClean else clean
+                if (shorter.length >= 6 && longer.startsWith("$shorter ")) return jf
+            }
+            return null
+        }
+    }
+
     override fun enrichWithJellyfinStreams(
         items: List<MediaItem>,
         jellyfinMovies: List<MediaItem>,
         jellyfinSeries: List<MediaItem>
     ): List<MediaItem> {
+        val seriesIndex = PoolIndex(jellyfinSeries)
+        val moviesIndex = PoolIndex(jellyfinMovies)
+
         return items.mapNotNull { item ->
             if (item.title.isBlank()) return@mapNotNull null
 
-            val candidatePool = if (item.category == MediaCategory.SERIES) jellyfinSeries else jellyfinMovies
-
-            val match = candidatePool.firstOrNull { jf ->
-                (item.tmdbId != null && jf.tmdbId != null && item.tmdbId == jf.tmdbId) ||
-                    titlesMatchSafely(jf.title, item.title)
-            }
+            val index = if (item.category == MediaCategory.SERIES) seriesIndex else moviesIndex
+            val match = index.findMatch(item)
 
             if (match != null) {
                 item.copy(
@@ -190,65 +232,62 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
         val raw = httpGet(url) ?: return@withContext null
         try {
             val root = json.decodeFromString<TmdbTvDetailsDto>(raw)
-            val seasonsList = mutableListOf<SeriesSeason>()
+            val seasonsList = coroutineScope {
+                root.seasons
+                    .filter { it.seasonNumber > 0 }
+                    .map { sObj ->
+                        async {
+                            val seasonNum = sObj.seasonNumber
+                            val sName = sObj.name.ifBlank { "Saison $seasonNum" }
+                            val epCount = sObj.episodeCount
 
-            for (sObj in root.seasons) {
-                val seasonNum = sObj.seasonNumber
-                if (seasonNum <= 0) continue
-                val sName = sObj.name.ifBlank { "Saison $seasonNum" }
-                val epCount = sObj.episodeCount
+                            val seasonUrl = "$BASE_URL/tv/$tmdbId/season/$seasonNum?api_key=$API_KEY&language=$lang"
+                            val seasonRaw = httpGet(seasonUrl)
+                            val epList = mutableListOf<SeriesEpisode>()
+                            if (seasonRaw != null) {
+                                val seasonRoot = json.decodeFromString<TmdbSeasonDetailDto>(seasonRaw)
+                                seasonRoot.episodes.forEachIndexed { idx, eObj ->
+                                    val epNum = if (eObj.episodeNumber > 0) eObj.episodeNumber else idx + 1
+                                    val epName = eObj.name.ifBlank { "Épisode $epNum" }
+                                    val stillUrl = eObj.stillPath?.takeIf { it.isNotBlank() }?.let { "$IMG_W780$it" } ?: seriesItem.backdropUrl
 
-                val seasonUrl = "$BASE_URL/tv/$tmdbId/season/$seasonNum?api_key=$API_KEY&language=$lang"
-                val seasonRaw = httpGet(seasonUrl)
-                val epList = mutableListOf<SeriesEpisode>()
-                if (seasonRaw != null) {
-                    val seasonRoot = json.decodeFromString<TmdbSeasonDetailDto>(seasonRaw)
-                    seasonRoot.episodes.forEachIndexed { idx, eObj ->
-                        val epNum = if (eObj.episodeNumber > 0) eObj.episodeNumber else idx + 1
-                        val epName = eObj.name.ifBlank { "Épisode $epNum" }
-                        val stillUrl = eObj.stillPath?.takeIf { it.isNotBlank() }?.let { "$IMG_W780$it" } ?: seriesItem.backdropUrl
+                                    epList.add(
+                                        SeriesEpisode(
+                                            id = "tmdb_ep_${tmdbId}_${seasonNum}_${epNum}",
+                                            seriesId = seriesItem.id,
+                                            seasonNumber = seasonNum,
+                                            episodeNumber = epNum,
+                                            title = epName,
+                                            plot = eObj.overview,
+                                            streamUrl = seriesItem.streamUrl,
+                                            posterUrl = stillUrl
+                                        )
+                                    )
+                                }
+                            }
 
-                        epList.add(
-                            SeriesEpisode(
-                                id = "tmdb_ep_${tmdbId}_${seasonNum}_${epNum}",
-                                seriesId = seriesItem.id,
-                                seasonNumber = seasonNum,
-                                episodeNumber = epNum,
-                                title = epName,
-                                plot = eObj.overview,
-                                streamUrl = seriesItem.streamUrl,
-                                posterUrl = stillUrl
-                            )
-                        )
+                            if (epList.isEmpty() && epCount > 0) {
+                                for (e in 1..epCount) {
+                                    epList.add(
+                                        SeriesEpisode(
+                                            id = "tmdb_ep_${tmdbId}_${seasonNum}_${e}",
+                                            seriesId = seriesItem.id,
+                                            seasonNumber = seasonNum,
+                                            episodeNumber = e,
+                                            title = "Épisode $e",
+                                            plot = "",
+                                            streamUrl = seriesItem.streamUrl,
+                                            posterUrl = seriesItem.backdropUrl
+                                        )
+                                    )
+                                }
+                            }
+
+                            if (epList.isNotEmpty()) SeriesSeason(seasonNum, sName, epList) else null
+                        }
                     }
-                }
-
-                if (epList.isEmpty() && epCount > 0) {
-                    for (e in 1..epCount) {
-                        epList.add(
-                            SeriesEpisode(
-                                id = "tmdb_ep_${tmdbId}_${seasonNum}_${e}",
-                                seriesId = seriesItem.id,
-                                seasonNumber = seasonNum,
-                                episodeNumber = e,
-                                title = "Épisode $e",
-                                plot = "",
-                                streamUrl = seriesItem.streamUrl,
-                                posterUrl = seriesItem.backdropUrl
-                            )
-                        )
-                    }
-                }
-
-                if (epList.isNotEmpty()) {
-                    seasonsList.add(
-                        SeriesSeason(
-                            seasonNumber = seasonNum,
-                            name = sName,
-                            episodes = epList
-                        )
-                    )
-                }
+                    .awaitAll()
+                    .filterNotNull()
             }
 
             if (seasonsList.isNotEmpty()) {
@@ -257,7 +296,13 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
                     seasons = seasonsList
                 )
             } else null
-        } catch (_: Exception) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SerializationException) {
+            Log.w("TmdbRepository", "Failed to parse series details for tmdbId=$tmdbId", e)
+            null
+        } catch (e: IllegalArgumentException) {
+            Log.w("TmdbRepository", "Invalid series details for tmdbId=$tmdbId", e)
             null
         }
     }
@@ -312,7 +357,11 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
                     )
                 )
             }
-        } catch (_: Exception) {}
+        } catch (e: SerializationException) {
+            Log.w("TmdbRepository", "Failed to parse TMDB results", e)
+        } catch (e: IllegalArgumentException) {
+            Log.w("TmdbRepository", "Invalid TMDB results payload", e)
+        }
         return list
     }
 
@@ -340,7 +389,13 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
                 }
             }
             if (fallbackKey != null) Pair("https://www.youtube.com/watch?v=$fallbackKey", fallbackName) else null
-        } catch (_: Exception) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SerializationException) {
+            Log.w("TmdbRepository", "Failed to parse movie trailer for tmdbId=$tmdbId", e)
+            null
+        } catch (e: IllegalArgumentException) {
+            Log.w("TmdbRepository", "Invalid trailer payload for tmdbId=$tmdbId", e)
             null
         }
     }
@@ -358,9 +413,14 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
                 .url(urlStr)
                 .header("Accept", "application/json")
                 .build()
-            val resp = client.newCall(req).execute()
-            if (resp.isSuccessful) resp.body?.string() else null
-        } catch (_: Exception) {
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) resp.body?.string() else null
+            }
+        } catch (e: IOException) {
+            Log.w("TmdbRepository", "HTTP GET failed for ${urlStr.substringBefore("?")}", e)
+            null
+        } catch (e: IllegalArgumentException) {
+            Log.w("TmdbRepository", "Invalid URL: ${urlStr.substringBefore("?")}", e)
             null
         }
     }

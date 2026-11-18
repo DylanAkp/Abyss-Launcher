@@ -6,9 +6,14 @@ import dev.dylanakp.abysstvlauncher.model.MediaCategory
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.SeerConfig
 import dev.dylanakp.abysstvlauncher.model.SeerMediaStatus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -17,6 +22,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
+import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -142,14 +148,18 @@ object SeerRepository : ISeerRepository, KoinComponent {
                 }
             }
 
-            val resp = client.newCall(reqBuilder.build()).execute()
-            if (!resp.isSuccessful) {
-                Log.w("AbyssSeer", "HTTP ${resp.code} on $urlStr")
-                return null
+            client.newCall(reqBuilder.build()).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.w("AbyssSeer", "HTTP ${resp.code} on $urlStr")
+                    return null
+                }
+                resp.body?.string()
             }
-            resp.body?.string()
-        } catch (e: Exception) {
-            Log.e("AbyssSeer", "Error in httpGet $urlStr: ${e.javaClass.simpleName} - ${e.message}")
+        } catch (e: IOException) {
+            Log.w("AbyssSeer", "Network error in httpGet $urlStr", e)
+            null
+        } catch (e: IllegalArgumentException) {
+            Log.w("AbyssSeer", "Invalid URL in httpGet $urlStr", e)
             null
         }
     }
@@ -172,11 +182,16 @@ object SeerRepository : ISeerRepository, KoinComponent {
                 }
             }
 
-            val resp = client.newCall(reqBuilder.build()).execute()
-            val text = resp.body?.string().orEmpty()
-            Pair(resp.code, text)
-        } catch (e: Exception) {
+            client.newCall(reqBuilder.build()).execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                Pair(resp.code, text)
+            }
+        } catch (e: IOException) {
+            Log.w("AbyssSeer", "Network error in httpPost $urlStr", e)
             Pair(-1, e.message ?: "Network error")
+        } catch (e: IllegalArgumentException) {
+            Log.w("AbyssSeer", "Invalid URL in httpPost $urlStr", e)
+            Pair(-1, e.message ?: "Invalid URL")
         }
     }
 
@@ -195,39 +210,48 @@ object SeerRepository : ISeerRepository, KoinComponent {
                 .header("Accept", "application/json")
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                val cookies = response.headers("Set-Cookie")
-                val sessionCookie = cookies.find { it.startsWith("connect.sid=") }
-                    ?.substringBefore(";")
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val cookies = response.headers("Set-Cookie")
+                    val sessionCookie = cookies.find { it.startsWith("connect.sid=") }
+                        ?.substringBefore(";")
 
-                var apiKey = ""
-                if (!sessionCookie.isNullOrBlank()) {
-                    try {
-                        val settingsReq = Request.Builder()
-                            .url("$server/api/v1/settings/main")
-                            .header("Cookie", sessionCookie)
-                            .header("Accept", "application/json")
-                            .build()
-                        val settingsResp = client.newCall(settingsReq).execute()
-                        if (settingsResp.isSuccessful) {
-                            val settingsJson = settingsResp.body?.string().orEmpty()
-                            apiKey = json.decodeFromString<SeerSettingsResponse>(settingsJson).apiKey
+                    var apiKey = ""
+                    if (!sessionCookie.isNullOrBlank()) {
+                        try {
+                            val settingsReq = Request.Builder()
+                                .url("$server/api/v1/settings/main")
+                                .header("Cookie", sessionCookie)
+                                .header("Accept", "application/json")
+                                .build()
+                            client.newCall(settingsReq).execute().use { settingsResp ->
+                                if (settingsResp.isSuccessful) {
+                                    val settingsJson = settingsResp.body?.string().orEmpty()
+                                    apiKey = json.decodeFromString<SeerSettingsResponse>(settingsJson).apiKey
+                                }
+                            }
+                        } catch (e: IOException) {
+                            Log.w("AbyssSeer", "Failed to fetch Seer API key after login", e)
+                        } catch (e: SerializationException) {
+                            Log.w("AbyssSeer", "Failed to parse Seer settings response", e)
                         }
-                    } catch (_: Exception) {}
-                }
+                    }
 
-                val finalToken = when {
-                    apiKey.isNotBlank() -> apiKey
-                    !sessionCookie.isNullOrBlank() -> sessionCookie
-                    else -> "connected"
+                    val finalToken = when {
+                        apiKey.isNotBlank() -> apiKey
+                        !sessionCookie.isNullOrBlank() -> sessionCookie
+                        else -> "connected"
+                    }
+                    Result.success(finalToken)
+                } else {
+                    val err = response.body?.string() ?: "HTTP ${response.code}"
+                    Result.failure(Exception("Authentication failed (${response.code}): $err"))
                 }
-                Result.success(finalToken)
-            } else {
-                val err = response.body?.string() ?: "HTTP ${response.code}"
-                Result.failure(Exception("Authentication failed (${response.code}): $err"))
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
+            Log.w("AbyssSeer", "Seer authentication failed", e)
             Result.failure(e)
         }
     }
@@ -244,7 +268,10 @@ object SeerRepository : ISeerRepository, KoinComponent {
         try {
             val status = json.decodeFromString<SeerStatusResponse>(raw)
             Result.success(status.version.ifBlank { "Seer Connected" })
-        } catch (e: Exception) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SerializationException) {
+            Log.w("AbyssSeer", "Failed to parse Seer status response", e)
             Result.failure(e)
         }
     }
@@ -333,6 +360,38 @@ object SeerRepository : ISeerRepository, KoinComponent {
         val results = mutableListOf<MediaItem>()
         try {
             val root = json.decodeFromString<SeerRequestListDto>(raw)
+            val missingLookups = root.results.mapNotNull { reqObj ->
+                val mediaObj = reqObj.media ?: return@mapNotNull null
+                val isTv = mediaObj.mediaType.equals("tv", ignoreCase = true)
+                val tmdbId = mediaObj.tmdbId
+                val title = reqObj.movie?.title?.ifBlank { null } ?: reqObj.tv?.name?.ifBlank { null } ?: ""
+                if (title.isBlank() && tmdbId > 0 && !metadataCache.containsKey(Pair(isTv, tmdbId))) {
+                    Pair(isTv, tmdbId)
+                } else null
+            }.distinct()
+
+            if (missingLookups.isNotEmpty()) {
+                val fetched = coroutineScope {
+                    missingLookups.map { (isTv, tmdbId) ->
+                        async {
+                            val endpoint = if (isTv) "$server/api/v1/tv/$tmdbId?language=${currentLang()}" else "$server/api/v1/movie/$tmdbId?language=${currentLang()}"
+                            val detailRaw = httpGet(endpoint, config.apiKey) ?: return@async null
+                            try {
+                                val dJson = json.decodeFromString<SeerDiscoverItemDto>(detailRaw)
+                                val title = if (isTv) dJson.name else dJson.title
+                                if (title.isNotBlank()) {
+                                    Pair(isTv, tmdbId) to Triple(title, dJson.posterPath.orEmpty(), dJson.backdropPath.orEmpty())
+                                } else null
+                            } catch (e: SerializationException) {
+                                Log.w("AbyssSeer", "Failed to parse Seer detail for tmdbId=$tmdbId", e)
+                                null
+                            }
+                        }
+                    }.awaitAll()
+                }
+                fetched.filterNotNull().forEach { (key, meta) -> metadataCache[key] = meta }
+            }
+
             for (reqObj in root.results) {
                 val mediaObj = reqObj.media ?: continue
                 val mediaType = mediaObj.mediaType
@@ -361,20 +420,6 @@ object SeerRepository : ISeerRepository, KoinComponent {
                         title = cached.first
                         posterPath = cached.second
                         backdropPath = cached.third
-                    } else {
-                        val endpoint = if (isTv) "$server/api/v1/tv/$tmdbId?language=${currentLang()}" else "$server/api/v1/movie/$tmdbId?language=${currentLang()}"
-                        val detailRaw = httpGet(endpoint, config.apiKey)
-                        if (!detailRaw.isNullOrBlank()) {
-                            try {
-                                val dJson = json.decodeFromString<SeerDiscoverItemDto>(detailRaw)
-                                title = if (isTv) dJson.name else dJson.title
-                                posterPath = dJson.posterPath.orEmpty()
-                                backdropPath = dJson.backdropPath.orEmpty()
-                                if (title.isNotBlank()) {
-                                    metadataCache[Pair(isTv, tmdbId)] = Triple(title, posterPath, backdropPath)
-                                }
-                            } catch (_: Exception) {}
-                        }
                     }
                 }
 
@@ -392,7 +437,7 @@ object SeerRepository : ISeerRepository, KoinComponent {
 
                 results.add(
                     MediaItem(
-                        id = "seer_req_${reqObj.hashCode()}_${tmdbId}",
+                        id = "seer_req_${mediaType}_${tmdbId}",
                         title = title,
                         category = MediaCategory.SEER_REQUEST,
                         groupTitle = "",
@@ -411,7 +456,11 @@ object SeerRepository : ISeerRepository, KoinComponent {
                     )
                 )
             }
-        } catch (_: Exception) {}
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SerializationException) {
+            Log.w("AbyssSeer", "Failed to parse Seer requests", e)
+        }
         results
     }
 
@@ -442,7 +491,10 @@ object SeerRepository : ISeerRepository, KoinComponent {
             } else {
                 Result.failure(Exception("Erreur Seer ($code) : $text"))
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
+            Log.w("AbyssSeer", "Seer requestMedia failed for tmdbId=$tmdbId", e)
             Result.failure(e)
         }
     }
@@ -519,7 +571,9 @@ object SeerRepository : ISeerRepository, KoinComponent {
                     )
                 )
             }
-        } catch (_: Exception) {}
+        } catch (e: SerializationException) {
+            Log.w("AbyssSeer", "Failed to parse Seer discover results", e)
+        }
         return list
     }
 }

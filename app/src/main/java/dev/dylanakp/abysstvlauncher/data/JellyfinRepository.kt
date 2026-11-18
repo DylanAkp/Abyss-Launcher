@@ -11,20 +11,25 @@ import dev.dylanakp.abysstvlauncher.model.SeriesDetails
 import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
 import dev.dylanakp.abysstvlauncher.model.SeriesSeason
 import dev.dylanakp.abysstvlauncher.model.SyncedLibrary
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromStream
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
+import java.io.IOException
 import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -153,45 +158,53 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
 
     private const val CLIENT_NAME = "AbyssLauncher"
     private const val DEVICE_NAME = "Android TV"
-    private const val DEVICE_ID = "Abyss-TV-Player"
     private const val CLIENT_VERSION = "2.0.0"
 
     private val client: OkHttpClient by inject()
     private val json: Json by inject()
 
+    private fun resolveDeviceId(): String =
+        org.koin.core.context.GlobalContext.getOrNull()?.get<LauncherPreferences>()?.deviceId
+            ?: "Abyss-TV-Player"
+
     override fun cleanUrl(raw: String): String {
         var u = raw.trim().trimEnd('/')
-        if (u.isNotBlank() && !u.startsWith("http://") && !u.startsWith("https://")) {
-            val isLocal = u.startsWith("192.168.") || u.startsWith("10.") || u.startsWith("172.") || u.startsWith("localhost") || u.contains(":8096")
+        if (u.isNotBlank() && !u.startsWith("http://", ignoreCase = true) && !u.startsWith("https://", ignoreCase = true)) {
+            val is172Private = u.startsWith("172.") &&
+                u.substringAfter("172.").substringBefore(".").toIntOrNull()?.let { it in 16..31 } == true
+            val isLocal = u.startsWith("192.168.") || u.startsWith("10.") || is172Private || u.startsWith("localhost") || u.contains(":8096")
             u = if (isLocal) "http://$u" else "https://$u"
         }
         return u
     }
 
     private fun buildAuthHeader(token: String = ""): String {
-        return "MediaBrowser Client=\"$CLIENT_NAME\", Device=\"$DEVICE_NAME\", DeviceId=\"$DEVICE_ID\", Version=\"$CLIENT_VERSION\"" +
+        val deviceId = resolveDeviceId()
+        return "MediaBrowser Client=\"$CLIENT_NAME\", Device=\"$DEVICE_NAME\", DeviceId=\"$deviceId\", Version=\"$CLIENT_VERSION\"" +
                 if (token.isNotBlank()) ", Token=\"$token\"" else ""
     }
 
     override fun getStreamUrl(config: JellyfinConfig, itemId: String, mediaSourceId: String?): String {
         val server = cleanUrl(config.serverUrl)
-        val token = config.accessToken
         val userId = config.userId
-        val userParam = if (userId.isNotBlank()) "&userId=$userId" else ""
-        val sourceParam = if (!mediaSourceId.isNullOrBlank()) "&MediaSourceId=$mediaSourceId" else ""
-        return "$server/Videos/$itemId/stream?static=true&api_key=$token$userParam$sourceParam"
+        val params = buildList {
+            add("static=true")
+            if (userId.isNotBlank()) add("userId=$userId")
+            if (!mediaSourceId.isNullOrBlank()) add("MediaSourceId=$mediaSourceId")
+        }.joinToString("&")
+        return "$server/Videos/$itemId/stream?$params"
     }
 
     override fun sanitizeStreamUrl(streamUrl: String, config: JellyfinConfig, mediaSourceId: String?): String {
-        if (streamUrl.isBlank() || config.userId.isBlank()) return streamUrl
-        var url = if (!streamUrl.contains("userId=")) {
-            if (streamUrl.contains("?")) "$streamUrl&userId=${config.userId}"
-            else "$streamUrl?userId=${config.userId}"
-        } else {
-            streamUrl
+        if (streamUrl.isBlank()) return streamUrl
+        var url = streamUrl
+            .replace(Regex("([?&])api_key=[^&]*&?"), "$1")
+            .trimEnd('&', '?')
+        if (config.userId.isNotBlank() && !url.contains("userId=")) {
+            url = if (url.contains("?")) "$url&userId=${config.userId}" else "$url?userId=${config.userId}"
         }
         if (!mediaSourceId.isNullOrBlank() && !url.contains("MediaSourceId=")) {
-            url = "$url&MediaSourceId=$mediaSourceId"
+            url = if (url.contains("?")) "$url&MediaSourceId=$mediaSourceId" else "$url?MediaSourceId=$mediaSourceId"
         }
         return url
     }
@@ -255,7 +268,10 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                     Result.failure(Exception("Jellyfin auth failed ($code): $err"))
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
+            Log.w("AbyssJellyfin", "Jellyfin authentication failed", e)
             Result.failure(e)
         }
     }
@@ -286,7 +302,10 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                     Result.failure(Exception("Connection failed with HTTP ${response.code}"))
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
+            Log.w("AbyssJellyfin", "Jellyfin authentication failed", e)
             Result.failure(e)
         }
     }
@@ -304,10 +323,46 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                 reqBuilder.header("X-Emby-Authorization", buildAuthHeader(token))
             }
 
-            val resp = client.newCall(reqBuilder.build()).execute()
-            if (!resp.isSuccessful) return null
-            resp.body?.string()
-        } catch (_: Exception) {
+            client.newCall(reqBuilder.build()).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                resp.body?.string()
+            }
+        } catch (e: IOException) {
+            Log.w("AbyssJellyfin", "HTTP GET failed for ${urlStr.substringBefore("?")}", e)
+            null
+        } catch (e: IllegalArgumentException) {
+            Log.w("AbyssJellyfin", "Invalid URL in HTTP GET: ${urlStr.substringBefore("?")}", e)
+            null
+        }
+    }
+
+    @OptIn(ExperimentalSerializationApi::class)
+    private inline fun <reified T> httpGetJson(urlStr: String, token: String): T? {
+        return try {
+            val reqBuilder = Request.Builder()
+                .url(urlStr)
+                .header("Accept", "application/json")
+                .header("User-Agent", "AbyssLauncher/2.0")
+
+            if (token.isNotBlank()) {
+                reqBuilder.header("X-Emby-Token", token)
+                reqBuilder.header("Authorization", buildAuthHeader(token))
+                reqBuilder.header("X-Emby-Authorization", buildAuthHeader(token))
+            }
+
+            client.newCall(reqBuilder.build()).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                val body = resp.body ?: return null
+                json.decodeFromStream<T>(body.byteStream())
+            }
+        } catch (e: IOException) {
+            Log.w("AbyssJellyfin", "HTTP GET stream failed for ${urlStr.substringBefore("?")}", e)
+            null
+        } catch (e: SerializationException) {
+            Log.w("AbyssJellyfin", "JSON stream decode failed for ${urlStr.substringBefore("?")}", e)
+            null
+        } catch (e: IllegalArgumentException) {
+            Log.w("AbyssJellyfin", "Invalid URL in HTTP GET stream: ${urlStr.substringBefore("?")}", e)
             null
         }
     }
@@ -328,9 +383,14 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                 reqBuilder.header("X-Emby-Authorization", buildAuthHeader(token))
             }
 
-            val resp = client.newCall(reqBuilder.build()).execute()
-            resp.isSuccessful
-        } catch (_: Exception) {
+            client.newCall(reqBuilder.build()).execute().use { resp ->
+                resp.isSuccessful
+            }
+        } catch (e: IOException) {
+            Log.w("AbyssJellyfin", "HTTP POST failed for ${urlStr.substringBefore("?")}", e)
+            false
+        } catch (e: IllegalArgumentException) {
+            Log.w("AbyssJellyfin", "Invalid URL in HTTP POST: ${urlStr.substringBefore("?")}", e)
             false
         }
     }
@@ -349,9 +409,14 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                 reqBuilder.header("X-Emby-Authorization", buildAuthHeader(token))
             }
 
-            val resp = client.newCall(reqBuilder.build()).execute()
-            resp.isSuccessful
-        } catch (_: Exception) {
+            client.newCall(reqBuilder.build()).execute().use { resp ->
+                resp.isSuccessful
+            }
+        } catch (e: IOException) {
+            Log.w("AbyssJellyfin", "HTTP DELETE failed for ${urlStr.substringBefore("?")}", e)
+            false
+        } catch (e: IllegalArgumentException) {
+            Log.w("AbyssJellyfin", "Invalid URL in HTTP DELETE: ${urlStr.substringBefore("?")}", e)
             false
         }
     }
@@ -376,7 +441,10 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                 )
                 Result.success(library)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
+            Log.w("AbyssJellyfin", "Jellyfin authentication failed", e)
             Result.failure(e)
         }
     }
@@ -388,10 +456,9 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         val fields = "Overview,Genres,CommunityRating,PremiereDate,ProductionYear,RunTimeTicks,MediaStreams,PrimaryImageAspectRatio,ProviderIds,UserData"
         val url = "$server/Users/$userId/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=DateCreated,SortName&SortOrder=Descending&Fields=$fields"
 
-        val raw = httpGet(url, token) ?: return@withContext emptyList()
+        val root = httpGetJson<JellyfinQueryResponseDto>(url, token) ?: return@withContext emptyList()
         val items = mutableListOf<MediaItem>()
         try {
-            val root = json.decodeFromString<JellyfinQueryResponseDto>(raw)
             for (obj in root.items) {
                 val id = obj.id
                 if (id.isBlank()) continue
@@ -422,7 +489,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
 
                 val poster = "$server/Items/$id/Images/Primary?fillWidth=400&quality=90"
                 val backdrop = "$server/Items/$id/Images/Backdrop/0?fillWidth=1280&quality=85"
-                val streamUrl = "$server/Videos/$id/stream?static=true&api_key=$token&userId=$userId"
+                val streamUrl = getStreamUrl(config, id)
 
                 items.add(
                     MediaItem(
@@ -434,8 +501,8 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                         rating = rating,
                         year = year,
                         durationOrSeasons = durationStr,
-                        qualityBadge = "4K UHD",
-                        audioBadge = "Atmos 7.1",
+                        qualityBadge = "",
+                        audioBadge = "",
                         streamUrl = streamUrl,
                         posterUrl = poster,
                         backdropUrl = backdrop,
@@ -445,7 +512,11 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                     )
                 )
             }
-        } catch (_: Exception) {}
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SerializationException) {
+            Log.w("AbyssJellyfin", "Failed to parse Jellyfin movies", e)
+        }
         items
     }
 
@@ -456,10 +527,9 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         val fields = "Overview,Genres,CommunityRating,PremiereDate,ProductionYear,RunTimeTicks,PrimaryImageAspectRatio,ProviderIds,UserData"
         val url = "$server/Users/$userId/Items?IncludeItemTypes=Series&Recursive=true&SortBy=DateCreated,SortName&SortOrder=Descending&Fields=$fields"
 
-        val raw = httpGet(url, token) ?: return@withContext emptyList()
+        val root = httpGetJson<JellyfinQueryResponseDto>(url, token) ?: return@withContext emptyList()
         val items = mutableListOf<MediaItem>()
         try {
-            val root = json.decodeFromString<JellyfinQueryResponseDto>(raw)
             for (obj in root.items) {
                 val id = obj.id
                 if (id.isBlank()) continue
@@ -494,13 +564,20 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                     )
                 )
             }
-        } catch (_: Exception) {}
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SerializationException) {
+            Log.w("AbyssJellyfin", "Failed to parse Jellyfin movies", e)
+        }
         items
     }
 
     override suspend fun fetchResumeAndNextUp(config: JellyfinConfig): List<MediaItem> = withContext(Dispatchers.IO) {
-        val resumeList = fetchResumeItems(config)
-        val nextUpList = fetchNextUpEpisodes(config)
+        val (resumeList, nextUpList) = coroutineScope {
+            val resumeDeferred = async { fetchResumeItems(config) }
+            val nextUpDeferred = async { fetchNextUpEpisodes(config) }
+            resumeDeferred.await() to nextUpDeferred.await()
+        }
 
         val seen = mutableSetOf<String>()
         val combined = mutableListOf<MediaItem>()
@@ -556,7 +633,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                                 category = MediaCategory.MOVIE,
                                 synopsis = obj.overview.orEmpty(),
                                 qualityBadge = "",
-                                streamUrl = "$server/Videos/$id/stream?static=true&api_key=$token&userId=$userId",
+                                streamUrl = getStreamUrl(config, id),
                                 posterUrl = "$server/Items/$id/Images/Primary?fillWidth=400&quality=90",
                                 backdropUrl = "$server/Items/$id/Images/Backdrop/0?fillWidth=1280&quality=85",
                                 progressPercent = progress,
@@ -582,7 +659,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                                 category = MediaCategory.SERIES,
                                 synopsis = obj.overview.orEmpty(),
                                 qualityBadge = "",
-                                streamUrl = "$server/Videos/$id/stream?static=true&api_key=$token&userId=$userId",
+                                streamUrl = getStreamUrl(config, id),
                                 posterUrl = if (seriesId.isNotBlank()) {
                                     "$server/Items/$seriesId/Images/Primary?fillWidth=400&quality=90"
                                 } else {
@@ -595,7 +672,11 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                         )
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: SerializationException) {
+                Log.w("AbyssJellyfin", "Failed to parse Jellyfin resume items", e)
+            }
         }
         results
     }
@@ -630,7 +711,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                             category = MediaCategory.SERIES,
                             synopsis = obj.overview.orEmpty(),
                             qualityBadge = "",
-                            streamUrl = "$server/Videos/$id/stream?static=true&api_key=$token&userId=$userId",
+                            streamUrl = getStreamUrl(config, id),
                             posterUrl = if (seriesId.isNotBlank()) {
                                 "$server/Items/$seriesId/Images/Primary?fillWidth=400&quality=90"
                             } else {
@@ -642,7 +723,11 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                         )
                     )
                 }
-            } catch (_: Exception) {}
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: SerializationException) {
+                Log.w("AbyssJellyfin", "Failed to parse Jellyfin next up episodes", e)
+            }
         }
         results
     }
@@ -701,7 +786,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                         episodeNumber = epNum,
                         title = epName,
                         plot = overview,
-                        streamUrl = "$server/Videos/$epId/stream?static=true&api_key=$token&userId=$userId",
+                        streamUrl = getStreamUrl(config, epId),
                         posterUrl = "$server/Items/$epId/Images/Primary?fillWidth=400&quality=90",
                         progressPercent = progress,
                         savedPositionMs = posMs,
@@ -717,7 +802,10 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                 )
             }
             SeriesDetails(seriesItem = seriesItem, seasons = seasonList)
-        } catch (_: Exception) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SerializationException) {
+            Log.w("AbyssJellyfin", "Failed to parse series details for $seriesId", e)
             null
         }
     }
@@ -758,7 +846,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                             val firstTrailer = localTrailers.firstOrNull()
                             if (firstTrailer != null && firstTrailer.id.isNotBlank()) {
                                 isLocalTrailer = true
-                                trailerUrl = "$server/Videos/${firstTrailer.id}/stream?static=true&api_key=$token&userId=$userId"
+                                trailerUrl = getStreamUrl(config, firstTrailer.id)
                                 trailerName = firstTrailer.name.ifBlank { "Bande-annonce" }
                             }
                         }
@@ -772,7 +860,11 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                         }
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: SerializationException) {
+                Log.w("AbyssJellyfin", "Failed to parse movie details for $jfId", e)
+            }
         }
 
         if (trailerUrl.isBlank() && movieItem.tmdbId != null) {
@@ -859,7 +951,10 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         if (!config.isConfigured || itemId.isBlank() || userId.isBlank()) return@withContext false
         try {
             httpGet("$server/Users/$userId/Items/$itemId", config.accessToken) != null
-        } catch (_: Exception) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            Log.w("AbyssJellyfin", "preparePlayback failed for $itemId", e)
             false
         }
     }
@@ -962,7 +1057,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                 val poster = "$server/Items/$id/Images/Primary?fillWidth=400&quality=90"
                 val backdrop = "$server/Items/$id/Images/Backdrop/0?fillWidth=1280&quality=85"
                 val streamUrl = if (category == MediaCategory.MOVIE) {
-                    "$server/Videos/$id/stream?static=true&api_key=$token&userId=$userId"
+                    getStreamUrl(config, id)
                 } else ""
 
                 results.add(
@@ -975,8 +1070,8 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                         rating = rating,
                         year = year,
                         durationOrSeasons = durationStr,
-                        qualityBadge = if (category == MediaCategory.MOVIE) "4K UHD" else "TV HD",
-                        audioBadge = if (category == MediaCategory.MOVIE) "Atmos 7.1" else "5.1",
+                        qualityBadge = "",
+                        audioBadge = "",
                         streamUrl = streamUrl,
                         posterUrl = poster,
                         backdropUrl = backdrop,
@@ -986,7 +1081,11 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                     )
                 )
             }
-        } catch (_: Exception) {}
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SerializationException) {
+            Log.w("AbyssJellyfin", "Failed to parse Jellyfin search results", e)
+        }
         results
     }
 }
