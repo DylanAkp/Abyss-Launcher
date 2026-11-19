@@ -119,10 +119,48 @@ function renderState(state) {
   }
 }
 
+const REPEAT_KEYS = new Set(["DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT", "DEL"]);
+
 document.querySelectorAll("[data-key]").forEach(btn => {
+  let pressTimer = null;
+  let repeatTimer = null;
+  let longPressFired = false;
+  const key = btn.dataset.key;
+  const clearPress = () => {
+    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    if (repeatTimer) { clearInterval(repeatTimer); repeatTimer = null; }
+  };
+  btn.addEventListener("pointerdown", () => {
+    clearPress();
+    longPressFired = false;
+    if (REPEAT_KEYS.has(key)) {
+      pressTimer = setTimeout(() => {
+        longPressFired = true;
+        haptic();
+        api("/api/key", { key }).catch(() => {});
+        repeatTimer = setInterval(() => {
+          api("/api/key", { key }).catch(() => {});
+        }, 130);
+      }, 380);
+    } else {
+      pressTimer = setTimeout(() => {
+        longPressFired = true;
+        haptic();
+        api("/api/key", { key, longPress: true }).catch(() => {});
+      }, 450);
+    }
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach(ev => {
+    btn.addEventListener(ev, clearPress);
+  });
   btn.addEventListener("click", () => {
+    clearPress();
+    if (longPressFired) {
+      longPressFired = false;
+      return;
+    }
     haptic();
-    api("/api/key", { key: btn.dataset.key }).catch(() => {});
+    api("/api/key", { key }).catch(() => {});
   });
 });
 
@@ -159,14 +197,23 @@ document.querySelectorAll(".seg-btn").forEach(btn => {
   });
 });
 
-// Swipe-threshold D-pad (56px) + tap for OK
+// Swipe-threshold D-pad (56px) + tap/hold for OK
 const touchpad = document.getElementById("touchpad");
-let startX = 0, startY = 0, moved = false;
+let startX = 0, startY = 0, moved = false, padTimer = null, padLongFired = false;
 touchpad.addEventListener("touchstart", (e) => {
   const t = e.touches[0];
   startX = t.clientX;
   startY = t.clientY;
   moved = false;
+  padLongFired = false;
+  if (padTimer) clearTimeout(padTimer);
+  padTimer = setTimeout(() => {
+    if (!moved) {
+      padLongFired = true;
+      haptic();
+      api("/api/key", { key: "DPAD_CENTER", longPress: true }).catch(() => {});
+    }
+  }, 450);
 });
 touchpad.addEventListener("touchmove", (e) => {
   e.preventDefault();
@@ -175,6 +222,7 @@ touchpad.addEventListener("touchmove", (e) => {
   const dy = t.clientY - startY;
   if (Math.hypot(dx, dy) >= 56) {
     moved = true;
+    if (padTimer) { clearTimeout(padTimer); padTimer = null; }
     const key = Math.abs(dx) > Math.abs(dy)
       ? (dx > 0 ? "DPAD_RIGHT" : "DPAD_LEFT")
       : (dy > 0 ? "DPAD_DOWN" : "DPAD_UP");
@@ -185,7 +233,8 @@ touchpad.addEventListener("touchmove", (e) => {
   }
 }, { passive: false });
 touchpad.addEventListener("touchend", () => {
-  if (!moved) {
+  if (padTimer) { clearTimeout(padTimer); padTimer = null; }
+  if (!moved && !padLongFired) {
     haptic();
     api("/api/key", { key: "DPAD_CENTER" }).catch(() => {});
   }

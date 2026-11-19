@@ -4,14 +4,15 @@ import android.content.Context
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
-import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
+import io.ktor.server.application.createRouteScopedPlugin
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.cio.CIOApplicationEngine
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
@@ -25,20 +26,26 @@ import io.ktor.sse.ServerSentEvent
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.util.concurrent.ConcurrentHashMap
 
 class RemoteHttpServer(
     private val context: Context,
     private val controller: TvCommandController,
     private val json: Json
 ) {
+    private data class PairAttemptState(val failures: Int = 0, val blockedUntilMs: Long = 0L)
+
     private var server: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
+    private val pairAttemptsByIp = ConcurrentHashMap<String, PairAttemptState>()
 
     val isRunning: Boolean
         get() = server != null
 
+    @Synchronized
     fun start(port: Int = TvCommandController.DEFAULT_PORT) {
         if (server != null) return
-        server = embeddedServer(CIO, port = port, host = "0.0.0.0") {
+        try {
+            server = embeddedServer(CIO, port = port, host = "0.0.0.0") {
             install(ContentNegotiation) {
                 json(this@RemoteHttpServer.json)
             }
@@ -64,27 +71,41 @@ class RemoteHttpServer(
                 }
 
                 post("/api/pair") {
+                    val clientIp = call.request.local.remoteAddress
+                    val now = System.currentTimeMillis()
+                    val currentAttempt = pairAttemptsByIp[clientIp]
+                    if (currentAttempt != null && now < currentAttempt.blockedUntilMs) {
+                        call.respond(HttpStatusCode.TooManyRequests, mapOf("error" to "rate_limited"))
+                        return@post
+                    }
+
                     val req = call.receive<PairRequest>()
                     val res = controller.pair(req.pin, req.token, req.deviceName)
                     if (res != null) {
+                        pairAttemptsByIp.remove(clientIp)
                         call.respond(HttpStatusCode.OK, res)
                     } else {
+                        val failures = (currentAttempt?.failures ?: 0) + 1
+                        val backoffMs = 1000L shl (failures - 1).coerceAtMost(5)
+                        pairAttemptsByIp[clientIp] = PairAttemptState(failures, now + backoffMs)
                         call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "invalid_pin"))
                     }
                 }
 
                 route("/api") {
-                    intercept(ApplicationCallPipeline.Plugins) {
-                        val path = call.request.local.uri.substringBefore("?")
-                        if (!path.startsWith("/api/") || path == "/api/pair" || path == "/api/health") return@intercept
-
-                        val token = call.request.headers["X-Remote-Token"]
-                            ?: call.request.queryParameters["token"]
-                        if (!controller.isTokenValid(token)) {
-                            call.respond(HttpStatusCode.Unauthorized)
-                            finish()
+                    install(
+                        createRouteScopedPlugin("RemoteTokenAuth") {
+                            onCall { call ->
+                                val reqPath = call.request.path()
+                                if (reqPath == "/api/health" || reqPath == "/api/pair") return@onCall
+                                val token = call.request.headers["X-Remote-Token"]
+                                    ?: call.request.queryParameters["token"]
+                                if (!controller.isTokenValid(token)) {
+                                    call.respond(HttpStatusCode.Unauthorized)
+                                }
+                            }
                         }
-                    }
+                    )
 
                     get("/state") {
                         controller.refreshState()
@@ -93,7 +114,7 @@ class RemoteHttpServer(
 
                     post("/key") {
                         val body = call.receive<KeyCommand>()
-                        controller.sendKey(body.key)
+                        controller.sendKey(body.key, body.longPress)
                         call.respond(HttpStatusCode.OK)
                     }
 
@@ -167,8 +188,13 @@ class RemoteHttpServer(
                 }
             }
         }.start(wait = false)
+        } catch (e: java.net.BindException) {
+            android.util.Log.w("RemoteHttpServer", "Port $port already in use", e)
+            server = null
+        }
     }
 
+    @Synchronized
     fun stop() {
         runCatching { server?.stop(200, 500) }
         server = null

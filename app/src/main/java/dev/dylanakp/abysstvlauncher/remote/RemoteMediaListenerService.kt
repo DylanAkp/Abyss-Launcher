@@ -23,10 +23,25 @@ data class ExternalMediaSnapshot(
 class RemoteMediaListenerService : NotificationListenerService() {
 
     private var sessionManager: MediaSessionManager? = null
+    private var trackedController: MediaController? = null
+    private val appLabelCache = mutableMapOf<String, String>()
+
+    private val controllerCallback = object : MediaController.Callback() {
+        override fun onPlaybackStateChanged(state: PlaybackState?) {
+            trackedController?.let { publishSnapshot(it) }
+        }
+
+        override fun onMetadataChanged(metadata: MediaMetadata?) {
+            trackedController?.let { publishSnapshot(it) }
+        }
+    }
+
     private val activeSessionsListener =
         MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
             updateFromControllers(controllers.orEmpty())
         }
+
+    fun getActiveController(): MediaController? = trackedController
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -41,7 +56,8 @@ class RemoteMediaListenerService : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         runCatching { sessionManager?.removeOnActiveSessionsChangedListener(activeSessionsListener) }
-        activeController = null
+        runCatching { trackedController?.unregisterCallback(controllerCallback) }
+        trackedController = null
         _externalMedia.value = null
         if (instance === this) instance = null
         super.onListenerDisconnected()
@@ -60,12 +76,21 @@ class RemoteMediaListenerService : NotificationListenerService() {
             pkg != packageName && controller.playbackState?.state in ACTIVE_STATES
         } ?: controllers.firstOrNull { it.packageName != packageName }
 
-        activeController = chosen
+        if (chosen?.sessionToken != trackedController?.sessionToken) {
+            runCatching { trackedController?.unregisterCallback(controllerCallback) }
+            trackedController = chosen
+            if (chosen != null) {
+                runCatching { chosen.registerCallback(controllerCallback) }
+            }
+        }
         if (chosen == null) {
             _externalMedia.value = null
             return
         }
+        publishSnapshot(chosen)
+    }
 
+    private fun publishSnapshot(chosen: MediaController) {
         val meta = chosen.metadata
         val pb = chosen.playbackState
         val title = meta?.getString(MediaMetadata.METADATA_KEY_TITLE)
@@ -82,10 +107,13 @@ class RemoteMediaListenerService : NotificationListenerService() {
         val duration = meta?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.coerceAtLeast(0L) ?: 0L
         val pos = pb?.position?.coerceAtLeast(0L) ?: 0L
         val playing = pb?.state == PlaybackState.STATE_PLAYING
-        val appLabel = runCatching {
-            val info = packageManager.getApplicationInfo(chosen.packageName, 0)
-            packageManager.getApplicationLabel(info).toString()
-        }.getOrDefault(chosen.packageName)
+        val pkg = chosen.packageName
+        val appLabel = appLabelCache.getOrPut(pkg) {
+            runCatching {
+                val info = packageManager.getApplicationInfo(pkg, 0)
+                packageManager.getApplicationLabel(info).toString()
+            }.getOrDefault(pkg)
+        }
 
         _externalMedia.value = ExternalMediaSnapshot(
             isPlaying = playing,
@@ -106,10 +134,6 @@ class RemoteMediaListenerService : NotificationListenerService() {
 
         @Volatile
         var instance: RemoteMediaListenerService? = null
-            private set
-
-        @Volatile
-        var activeController: MediaController? = null
             private set
 
         private val _externalMedia = MutableStateFlow<ExternalMediaSnapshot?>(null)

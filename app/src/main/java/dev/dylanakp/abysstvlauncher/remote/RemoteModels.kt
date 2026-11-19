@@ -17,7 +17,8 @@ data class PairResponse(
 
 @Serializable
 data class KeyCommand(
-    val key: String
+    val key: String,
+    val longPress: Boolean = false
 )
 
 @Serializable
