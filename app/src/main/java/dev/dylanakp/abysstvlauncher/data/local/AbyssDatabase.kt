@@ -27,7 +27,7 @@ abstract class AbyssDatabase : RoomDatabase() {
                     context.applicationContext,
                     AbyssDatabase::class.java,
                     "abyss_tv.db"
-                ).fallbackToDestructiveMigration(dropAllTables = true).build().also { instance = it }
+                ).fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true).build().also { instance = it }
             }
     }
 }

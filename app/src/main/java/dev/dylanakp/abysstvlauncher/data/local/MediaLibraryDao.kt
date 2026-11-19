@@ -12,6 +12,9 @@ interface MediaLibraryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(items: List<MediaItemEntity>)
 
+    @Query("SELECT * FROM cached_media_items ORDER BY sortIndex ASC")
+    suspend fun getAllItems(): List<MediaItemEntity>
+
     @Query("SELECT * FROM cached_media_items WHERE librarySection = :section ORDER BY sortIndex ASC")
     suspend fun getItemsBySection(section: String): List<MediaItemEntity>
 

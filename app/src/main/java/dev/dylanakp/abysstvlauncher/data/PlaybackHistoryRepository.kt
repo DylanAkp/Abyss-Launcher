@@ -21,9 +21,10 @@ object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
 
     private const val LEGACY_HISTORY_FILE = "playback_history.json"
     private val database: AbyssDatabase by inject()
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val json: Json by inject()
     private val cache = ConcurrentHashMap<String, PlaybackHistoryEntry>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val loadComplete = kotlinx.coroutines.CompletableDeferred<Unit>()
     private var isLoaded = false
 
     @Synchronized
@@ -31,18 +32,22 @@ object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
         if (isLoaded) return
         isLoaded = true
         scope.launch {
-            context?.let { migrateLegacyFileIfPresent(it) }
-            val dao = database.playbackHistoryDao()
-            val entities = dao.getAll()
-            entities.forEach { entity ->
-                val entry = entity.toDomain()
-                cache[entry.itemId] = entry
-                if (entry.seriesId.isNotBlank()) {
-                    val existing = cache[entry.seriesId]
-                    if (existing == null || entry.lastPlayedTimestamp >= existing.lastPlayedTimestamp) {
-                        cache[entry.seriesId] = entry.copy(itemId = entry.seriesId)
+            try {
+                context?.let { migrateLegacyFileIfPresent(it) }
+                val dao = database.playbackHistoryDao()
+                val entities = dao.getAll()
+                entities.forEach { entity ->
+                    val entry = entity.toDomain()
+                    cache[entry.itemId] = entry
+                    if (entry.seriesId.isNotBlank()) {
+                        val existing = cache[entry.seriesId]
+                        if (existing == null || entry.lastPlayedTimestamp >= existing.lastPlayedTimestamp) {
+                            cache[entry.seriesId] = entry.copy(itemId = entry.seriesId)
+                        }
                     }
                 }
+            } finally {
+                loadComplete.complete(Unit)
             }
         }
     }
@@ -51,16 +56,19 @@ object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
         val file = File(context.filesDir, LEGACY_HISTORY_FILE)
         if (!file.exists()) return@withContext
 
-        runCatching {
+        try {
             val raw = file.readText()
             if (raw.isNotBlank()) {
                 val entries = json.decodeFromString<List<PlaybackHistoryEntry>>(raw)
                 val entities = entries.map { PlaybackHistoryEntity.fromDomain(it) }
                 if (entities.isNotEmpty()) {
-                    AbyssDatabase.getInstance(context).playbackHistoryDao().upsertAll(entities)
+                    database.playbackHistoryDao().upsertAll(entities)
                 }
             }
             file.delete()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
         }
     }
 
@@ -75,6 +83,9 @@ object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
 
     override fun getAllEntries(context: Context): Map<String, PlaybackHistoryEntry> {
         ensureLoaded(context)
+        if (!loadComplete.isCompleted) {
+            kotlinx.coroutines.runBlocking { loadComplete.await() }
+        }
         return cache.toMap()
     }
 

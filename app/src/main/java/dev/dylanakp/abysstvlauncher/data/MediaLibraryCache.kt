@@ -1,6 +1,7 @@
 package dev.dylanakp.abysstvlauncher.data
 
 import android.content.Context
+import androidx.room.withTransaction
 import dev.dylanakp.abysstvlauncher.data.local.AbyssDatabase
 import dev.dylanakp.abysstvlauncher.data.local.MediaItemEntity
 import dev.dylanakp.abysstvlauncher.model.MediaItem
@@ -18,11 +19,7 @@ object MediaLibraryCache : IMediaLibraryCache, KoinComponent {
 
     private const val LEGACY_CACHE_FILE = "synced_library.json"
     private val database: AbyssDatabase by inject()
-
-    private val json = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
-    }
+    private val json: Json by inject()
 
     override suspend fun clear(context: Context?): Unit = withContext(Dispatchers.IO) {
         runCatching {
@@ -41,26 +38,28 @@ object MediaLibraryCache : IMediaLibraryCache, KoinComponent {
         fun mapEntities(items: List<MediaItem>, section: String): List<MediaItemEntity> =
             items.mapIndexed { idx, item -> MediaItemEntity.fromDomain(item, section, idx) }
 
-        dao.replaceSection("movies", mapEntities(library.movies, "movies"))
-        dao.replaceSection("series", mapEntities(library.series, "series"))
-        dao.replaceSection("tmdbTrending", mapEntities(library.tmdbTrending, "tmdbTrending"))
-        dao.replaceSection("seerTrending", mapEntities(library.seerTrending, "seerTrending"))
-        dao.replaceSection("seerPopularMovies", mapEntities(library.seerPopularMovies, "seerPopularMovies"))
-        dao.replaceSection("seerPopularTv", mapEntities(library.seerPopularTv, "seerPopularTv"))
-        dao.replaceSection("seerRequests", mapEntities(library.seerRequests, "seerRequests"))
+        database.withTransaction {
+            dao.replaceSection("movies", mapEntities(library.movies, "movies"))
+            dao.replaceSection("series", mapEntities(library.series, "series"))
+            dao.replaceSection("tmdbTrending", mapEntities(library.tmdbTrending, "tmdbTrending"))
+            dao.replaceSection("seerTrending", mapEntities(library.seerTrending, "seerTrending"))
+            dao.replaceSection("seerPopularMovies", mapEntities(library.seerPopularMovies, "seerPopularMovies"))
+            dao.replaceSection("seerPopularTv", mapEntities(library.seerPopularTv, "seerPopularTv"))
+            dao.replaceSection("seerRequests", mapEntities(library.seerRequests, "seerRequests"))
+        }
     }
 
     override suspend fun load(context: Context?): SyncedLibrary? = withContext(Dispatchers.IO) {
         context?.let { migrateLegacyFileIfPresent(it) }
 
-        val dao = database.mediaLibraryDao()
-        val movies = dao.getItemsBySection("movies").map { it.toDomain() }
-        val series = dao.getItemsBySection("series").map { it.toDomain() }
-        val tmdbTrending = dao.getItemsBySection("tmdbTrending").map { it.toDomain() }
-        val seerTrending = dao.getItemsBySection("seerTrending").map { it.toDomain() }
-        val seerPopularMovies = dao.getItemsBySection("seerPopularMovies").map { it.toDomain() }
-        val seerPopularTv = dao.getItemsBySection("seerPopularTv").map { it.toDomain() }
-        val seerRequests = dao.getItemsBySection("seerRequests").map { it.toDomain() }
+        val bySection = database.mediaLibraryDao().getAllItems().groupBy { it.librarySection }
+        val movies = bySection["movies"].orEmpty().map { it.toDomain() }
+        val series = bySection["series"].orEmpty().map { it.toDomain() }
+        val tmdbTrending = bySection["tmdbTrending"].orEmpty().map { it.toDomain() }
+        val seerTrending = bySection["seerTrending"].orEmpty().map { it.toDomain() }
+        val seerPopularMovies = bySection["seerPopularMovies"].orEmpty().map { it.toDomain() }
+        val seerPopularTv = bySection["seerPopularTv"].orEmpty().map { it.toDomain() }
+        val seerRequests = bySection["seerRequests"].orEmpty().map { it.toDomain() }
 
         if (movies.isEmpty() && series.isEmpty() && tmdbTrending.isEmpty() && seerTrending.isEmpty()) {
             null
