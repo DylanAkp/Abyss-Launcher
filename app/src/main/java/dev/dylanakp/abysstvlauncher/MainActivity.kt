@@ -1,6 +1,9 @@
 package dev.dylanakp.abysstvlauncher
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -16,8 +19,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
 import dev.dylanakp.abysstvlauncher.data.LauncherPreferences
 import dev.dylanakp.abysstvlauncher.model.AppLanguage
@@ -35,15 +42,40 @@ class MainActivity : ComponentActivity() {
     private val remoteController: TvCommandController by inject()
     private val preferences: LauncherPreferences by inject()
 
+    private val packageReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            viewModel.refreshInstalledApps(this@MainActivity)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        registerReceiver(
+            packageReceiver,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_PACKAGE_ADDED)
+                addAction(Intent.ACTION_PACKAGE_REMOVED)
+                addAction(Intent.ACTION_PACKAGE_CHANGED)
+                addAction(Intent.ACTION_PACKAGE_REPLACED)
+                addDataScheme("package")
+            }
+        )
         if (preferences.remoteServerEnabled) {
             RemoteBridgeService.start(this)
         }
         lifecycleScope.launch {
-            remoteController.playMediaRequests.collect { item ->
-                viewModel.onMediaItemClicked(this@MainActivity, item)
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    remoteController.playMediaRequests.collect { item ->
+                        viewModel.onMediaItemClicked(this@MainActivity, item)
+                    }
+                }
+                launch {
+                    remoteController.nextEpisodeRequests.collect { nextEp ->
+                        viewModel.playNextEpisodeInPlayer(nextEp)
+                    }
+                }
             }
         }
 
@@ -52,14 +84,24 @@ class MainActivity : ComponentActivity() {
             val configuration = LocalConfiguration.current
             val context = LocalContext.current
 
-            val localizedContext = remember(uiState.language) {
+            androidx.compose.runtime.LaunchedEffect(uiState.language) {
+                val locales = when (uiState.language) {
+                    AppLanguage.FR -> LocaleListCompat.forLanguageTags("fr")
+                    AppLanguage.EN -> LocaleListCompat.forLanguageTags("en")
+                    AppLanguage.AUTO -> LocaleListCompat.getEmptyLocaleList()
+                }
+                if (AppCompatDelegate.getApplicationLocales() != locales) {
+                    AppCompatDelegate.setApplicationLocales(locales)
+                }
+            }
+
+            val localizedContext = remember(uiState.language, configuration) {
                 val targetLocale = when (uiState.language) {
                     AppLanguage.FR -> java.util.Locale.FRENCH
                     AppLanguage.EN -> java.util.Locale.ENGLISH
                     AppLanguage.AUTO -> null
                 }
                 if (targetLocale != null) {
-                    java.util.Locale.setDefault(targetLocale)
                     val conf = Configuration(configuration)
                     conf.setLocale(targetLocale)
                     context.createConfigurationContext(conf)
@@ -91,7 +133,6 @@ class MainActivity : ComponentActivity() {
                 onBackPressedDispatcher.onBackPressed()
                 return true
             }
-            return true
         }
         return super.dispatchKeyEvent(event)
     }
@@ -99,11 +140,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         remoteController.attachActivity(this)
-        viewModel.refreshInstalledApps(this)
         viewModel.onActivityResumed()
-        if (intent?.hasCategory(Intent.CATEGORY_HOME) == true || intent?.action == Intent.ACTION_MAIN) {
-            viewModel.handleHomePressed()
-        }
+    }
+
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(packageReceiver) }
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {

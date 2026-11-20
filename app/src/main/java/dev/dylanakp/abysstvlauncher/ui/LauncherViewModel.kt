@@ -2,8 +2,11 @@ package dev.dylanakp.abysstvlauncher.ui
 
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
 import android.net.Uri
 import android.util.Log
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.dylanakp.abysstvlauncher.BuildConfig
@@ -33,6 +36,8 @@ import dev.dylanakp.abysstvlauncher.model.PlaybackHistoryEntry
 import dev.dylanakp.abysstvlauncher.model.PlayerPreference
 import dev.dylanakp.abysstvlauncher.model.SeerConfig
 import dev.dylanakp.abysstvlauncher.model.SeerMediaStatus
+import dev.dylanakp.abysstvlauncher.ui.viewmodels.LauncherSearchDelegate
+import dev.dylanakp.abysstvlauncher.ui.viewmodels.LauncherUpdateDelegate
 import dev.dylanakp.abysstvlauncher.model.SeriesDetails
 import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
 import dev.dylanakp.abysstvlauncher.model.SyncedLibrary
@@ -40,6 +45,9 @@ import dev.dylanakp.abysstvlauncher.model.TvAppInfo
 import dev.dylanakp.abysstvlauncher.ui.player.PlayerSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,6 +58,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+@Immutable
 data class LauncherUiState(
     val selectedTab: AbyssNavTab = AbyssNavTab.HOME,
     val language: AppLanguage = AppLanguage.AUTO,
@@ -92,6 +101,10 @@ data class LauncherUiState(
     val isLoadingSeriesDetails: Boolean = false,
 
     val allApps: List<TvAppInfo> = emptyList(),
+    val pinnedApps: List<TvAppInfo> = emptyList(),
+    val visibleApps: List<TvAppInfo> = emptyList(),
+    val hiddenAppsList: List<TvAppInfo> = emptyList(),
+    val watchlistItems: List<MediaItem> = emptyList(),
     val selectedAppForMenu: TvAppInfo? = null,
     val selectedMediaForMenu: MediaItem? = null,
 
@@ -122,18 +135,6 @@ data class LauncherUiState(
                 spotlightCandidates.first()
             }
         } else null
-
-    val pinnedApps: List<TvAppInfo>
-        get() = allApps.filter { it.isPinned && !it.isHidden }.sortedBy { it.pinOrder }
-
-    val visibleApps: List<TvAppInfo>
-        get() = allApps.filter { !it.isHidden }
-
-    val hiddenAppsList: List<TvAppInfo>
-        get() = allApps.filter { it.isHidden }
-
-    val watchlistItems: List<MediaItem>
-        get() = (movies + series).filter { watchlistIds.contains(it.id) }
 }
 
 class LauncherViewModel : ViewModel() {
@@ -141,53 +142,71 @@ class LauncherViewModel : ViewModel() {
     private var prefs: LauncherPreferences? = null
     private var appContext: Context? = null
     private var isInitialized = false
-    private var needsAppRefreshOnResume = false
+    @Volatile
+    private var hasSyncedJellyfinThisSession = false
+    @Volatile
+    private var hasSyncedSeerThisSession = false
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val _uiState = MutableStateFlow(LauncherUiState())
     val uiState: StateFlow<LauncherUiState> = _uiState.asStateFlow()
+
+    private val searchDelegate: LauncherSearchDelegate by lazy {
+        LauncherSearchDelegate(viewModelScope, _uiState) { prefs }
+    }
+    private val updateDelegate: LauncherUpdateDelegate by lazy {
+        LauncherUpdateDelegate(viewModelScope, _uiState) { resId: Int, args: Array<out Any> ->
+            showStatusMessage(resId, *args)
+        }
+    }
 
 
     fun initialize(context: Context) {
         if (isInitialized) return
         isInitialized = true
         appContext = context.applicationContext
+        registerNetworkSyncCallback(context.applicationContext)
         val preferences = prefs ?: LauncherPreferences(context).also { prefs = it }
 
-        val lang = preferences.language
-        applyLanguage(lang)
-
-        val wCity = preferences.weatherCity
-        val tUnit = preferences.temperatureUnit
-        _uiState.update { it.copy(weatherCity = wCity, temperatureUnit = tUnit) }
-        fetchWeather(wCity)
-        startWeatherLoop()
-
-        var jfConfig = preferences.jellyfinConfig
-        val defaultUser = BuildConfig.DEFAULT_JELLYFIN_USER
-        if (defaultUser.isNotBlank() && (jfConfig.username != defaultUser || jfConfig.accessToken.isBlank())) {
-            jfConfig = jfConfig.copy(
-                serverUrl = BuildConfig.DEFAULT_JELLYFIN_SERVER.ifBlank { jfConfig.serverUrl },
-                username = defaultUser,
-                password = BuildConfig.DEFAULT_JELLYFIN_PASS.ifBlank { jfConfig.password },
-                accessToken = if (jfConfig.username != defaultUser) "" else jfConfig.accessToken
-            )
-            preferences.jellyfinConfig = jfConfig
-        }
-
-        var seerConfig = preferences.seerConfig
-        val defaultSeerSrv = BuildConfig.DEFAULT_SEER_SERVER
-        val defaultSeerKey = BuildConfig.DEFAULT_SEER_API_KEY
-        if (defaultSeerSrv.isNotBlank() && (seerConfig.serverUrl.isBlank() || seerConfig.serverUrl != defaultSeerSrv || (defaultSeerKey.isNotBlank() && seerConfig.apiKey != defaultSeerKey))) {
-            seerConfig = seerConfig.copy(
-                serverUrl = defaultSeerSrv,
-                apiKey = defaultSeerKey.ifBlank { seerConfig.apiKey }
-            )
-            preferences.seerConfig = seerConfig
-        }
-
-        val initialTab = if (!seerConfig.isConfigured && _uiState.value.selectedTab == AbyssNavTab.DISCOVER) AbyssNavTab.HOME else _uiState.value.selectedTab
-
-        // 1. Parallel load of local disk cache, playback history, and installed apps on IO
+        // 1. Await DataStore load, then parallel load of disk cache, playback history, and installed apps on IO
         viewModelScope.launch(Dispatchers.IO) {
+            preferences.awaitLoaded()
+
+            val lang = preferences.language
+            withContext(Dispatchers.Main) {
+                applyLanguage(lang)
+            }
+
+            val wCity = preferences.weatherCity
+            val tUnit = preferences.temperatureUnit
+            _uiState.update { it.copy(weatherCity = wCity, temperatureUnit = tUnit) }
+            fetchWeather(wCity)
+            startWeatherLoop()
+
+            var jfConfig = preferences.jellyfinConfig
+            val defaultUser = BuildConfig.DEFAULT_JELLYFIN_USER
+            if (defaultUser.isNotBlank() && (jfConfig.username != defaultUser || jfConfig.accessToken.isBlank())) {
+                jfConfig = jfConfig.copy(
+                    serverUrl = BuildConfig.DEFAULT_JELLYFIN_SERVER.ifBlank { jfConfig.serverUrl },
+                    username = defaultUser,
+                    password = BuildConfig.DEFAULT_JELLYFIN_PASS.ifBlank { jfConfig.password },
+                    accessToken = if (jfConfig.username != defaultUser) "" else jfConfig.accessToken
+                )
+                preferences.jellyfinConfig = jfConfig
+            }
+
+            var seerConfig = preferences.seerConfig
+            val defaultSeerSrv = BuildConfig.DEFAULT_SEER_SERVER
+            val defaultSeerKey = BuildConfig.DEFAULT_SEER_API_KEY
+            if (defaultSeerSrv.isNotBlank() && (seerConfig.serverUrl.isBlank() || seerConfig.serverUrl != defaultSeerSrv || (defaultSeerKey.isNotBlank() && seerConfig.apiKey != defaultSeerKey))) {
+                seerConfig = seerConfig.copy(
+                    serverUrl = defaultSeerSrv,
+                    apiKey = defaultSeerKey.ifBlank { seerConfig.apiKey }
+                )
+                preferences.seerConfig = seerConfig
+            }
+
+            val initialTab = if (!seerConfig.isConfigured && _uiState.value.selectedTab == AbyssNavTab.DISCOVER) AbyssNavTab.HOME else _uiState.value.selectedTab
+
             val cachedDeferred = async { MediaLibraryCache.load(context) }
             val historyDeferred = async { PlaybackHistoryRepository.getAllEntries(context) }
             val appsDeferred = async {
@@ -221,16 +240,17 @@ class LauncherViewModel : ViewModel() {
                 seerRequests = cached?.seerRequests.orEmpty()
             )
 
-            val derived = withContext(Dispatchers.Default) {
-                recomputeDerivedState(
-                    current = baseState,
-                    movies = enrichedMovies.ifEmpty { baseState.movies },
-                    series = enrichedSeries.ifEmpty { baseState.series },
-                    tmdbTrending = cached?.tmdbTrending ?: baseState.tmdbTrending,
-                    playbackHistory = history
-                )
+            withContext(Dispatchers.Default) {
+                _uiState.update {
+                    recomputeDerivedState(
+                        current = baseState,
+                        movies = enrichedMovies.ifEmpty { baseState.movies },
+                        series = enrichedSeries.ifEmpty { baseState.series },
+                        tmdbTrending = cached?.tmdbTrending ?: baseState.tmdbTrending,
+                        playbackHistory = history
+                    )
+                }
             }
-            _uiState.value = derived
 
             // 2. Auto-sync Jellyfin library if configured
             if (jfConfig.isConfigured) {
@@ -251,11 +271,12 @@ class LauncherViewModel : ViewModel() {
                         val currentSeries = _uiState.value.series
                         val enrichedTrending = TmdbRepository.enrichWithJellyfinStreams(trending, currentMovies, currentSeries)
                         withContext(Dispatchers.Default) {
-                            val updated = recomputeDerivedState(
-                                current = _uiState.value,
-                                tmdbTrending = enrichedTrending
-                            )
-                            _uiState.value = updated
+                            _uiState.update { current ->
+                                recomputeDerivedState(
+                                    current = current,
+                                    tmdbTrending = enrichedTrending
+                                )
+                            }
                         }
                     }
                 } catch (_: Exception) {}
@@ -378,6 +399,10 @@ class LauncherViewModel : ViewModel() {
         }
 
         val enrichedSeriesDetails = applyHistoryToSeriesDetails(current.activeSeriesDetails, playbackHistory)
+        val pinned = current.allApps.filter { it.isPinned && !it.isHidden }.sortedBy { it.pinOrder }
+        val visible = current.allApps.filter { !it.isHidden }
+        val hidden = current.allApps.filter { it.isHidden }
+        val watchlist = (movies + series).filter { current.watchlistIds.contains(it.id) }
 
         return current.copy(
             selectedTab = selectedTab,
@@ -395,7 +420,11 @@ class LauncherViewModel : ViewModel() {
             moviesNouveautes = movNouv,
             seriesTop100 = serTop100,
             seriesNouveautes = serNouv,
-            spotlightCandidates = candidates
+            spotlightCandidates = candidates,
+            pinnedApps = pinned,
+            visibleApps = visible,
+            hiddenAppsList = hidden,
+            watchlistItems = watchlist
         )
     }
 
@@ -499,13 +528,14 @@ class LauncherViewModel : ViewModel() {
         }
         val updatedHistory = PlaybackHistoryRepository.getAllEntries(context)
         viewModelScope.launch(Dispatchers.Default) {
-            val derived = recomputeDerivedState(
-                current = _uiState.value.copy(activePlayerSession = session),
-                movies = applyHistoryToItems(_uiState.value.movies, updatedHistory),
-                series = applyHistoryToItems(_uiState.value.series, updatedHistory),
-                playbackHistory = updatedHistory
-            )
-            _uiState.value = derived
+            _uiState.update { current ->
+                recomputeDerivedState(
+                    current = current.copy(activePlayerSession = session),
+                    movies = applyHistoryToItems(current.movies, updatedHistory),
+                    series = applyHistoryToItems(current.series, updatedHistory),
+                    playbackHistory = updatedHistory
+                )
+            }
         }
     }
 
@@ -730,13 +760,14 @@ class LauncherViewModel : ViewModel() {
             }
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
             viewModelScope.launch(Dispatchers.Default) {
-                val derived = recomputeDerivedState(
-                    current = _uiState.value.copy(activePlayerSession = session),
-                    movies = applyHistoryToItems(_uiState.value.movies, updatedHistory),
-                    series = applyHistoryToItems(_uiState.value.series, updatedHistory),
-                    playbackHistory = updatedHistory
-                )
-                _uiState.value = derived
+                _uiState.update { current ->
+                    recomputeDerivedState(
+                        current = current.copy(activePlayerSession = session),
+                        movies = applyHistoryToItems(current.movies, updatedHistory),
+                        series = applyHistoryToItems(current.series, updatedHistory),
+                        playbackHistory = updatedHistory
+                    )
+                }
             }
         }
     }
@@ -783,55 +814,20 @@ class LauncherViewModel : ViewModel() {
         }
     }
 
-    fun updatePlaybackProgress(positionMs: Long, durationMs: Long) {
+    fun updatePlaybackProgress(
+        positionMs: Long,
+        durationMs: Long,
+        isPaused: Boolean = false,
+        sessionOverride: PlayerSession? = null
+    ) {
         val ctx = appContext ?: return
-        val session = _uiState.value.activePlayerSession ?: return
+        val session = sessionOverride ?: _uiState.value.activePlayerSession ?: return
         if (durationMs <= 0L && positionMs <= 0L) return
 
         val itemId = session.mediaItem.id
 
-        // Report to Jellyfin server
         viewModelScope.launch(Dispatchers.IO) {
-            JellyfinRepository.reportPlaybackProgress(_uiState.value.jellyfinConfig, itemId, positionMs, isPaused = false)
-        }
-
-        PlaybackHistoryRepository.saveProgress(
-            context = ctx,
-            itemId = itemId,
-            positionMs = positionMs,
-            durationMs = durationMs,
-            seriesId = session.seriesId,
-            seasonNumber = session.seasonNumber,
-            episodeNumber = session.episodeNumber,
-            episodeTitle = session.subtitle,
-            streamUrl = session.streamUrl,
-            title = session.mediaItem.title(),
-            posterUrl = session.mediaItem.posterUrl,
-            backdropUrl = session.mediaItem.backdropUrl.ifBlank { session.mediaItem.posterUrl },
-            category = if (session.seriesId.isNotBlank()) MediaCategory.SERIES.name else MediaCategory.MOVIE.name
-        )
-        val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
-        viewModelScope.launch(Dispatchers.Default) {
-            val derived = recomputeDerivedState(
-                current = _uiState.value,
-                movies = applyHistoryToItems(_uiState.value.movies, updatedHistory),
-                series = applyHistoryToItems(_uiState.value.series, updatedHistory),
-                playbackHistory = updatedHistory
-            )
-            _uiState.value = derived
-        }
-    }
-
-    fun closePlayer(positionMs: Long, durationMs: Long) {
-        val ctx = appContext
-        val session = _uiState.value.activePlayerSession
-        if (ctx != null && session != null && (durationMs > 0L || positionMs > 0L)) {
-            val itemId = session.mediaItem.id
-
-            // Report stopped to Jellyfin server
-            viewModelScope.launch(Dispatchers.IO) {
-                JellyfinRepository.reportPlaybackStopped(_uiState.value.jellyfinConfig, itemId, positionMs)
-            }
+            JellyfinRepository.reportPlaybackProgress(_uiState.value.jellyfinConfig, itemId, positionMs, isPaused = isPaused)
 
             PlaybackHistoryRepository.saveProgress(
                 context = ctx,
@@ -848,16 +844,47 @@ class LauncherViewModel : ViewModel() {
                 backdropUrl = session.mediaItem.backdropUrl.ifBlank { session.mediaItem.posterUrl },
                 category = if (session.seriesId.isNotBlank()) MediaCategory.SERIES.name else MediaCategory.MOVIE.name
             )
-            val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
-            val derived = recomputeDerivedState(
-                current = _uiState.value.copy(activePlayerSession = null),
-                movies = applyHistoryToItems(_uiState.value.movies, updatedHistory),
-                series = applyHistoryToItems(_uiState.value.series, updatedHistory),
-                playbackHistory = updatedHistory
-            )
-            _uiState.value = derived
-        } else {
-            _uiState.update { it.copy(activePlayerSession = null) }
+        }
+    }
+
+    fun closePlayer(positionMs: Long, durationMs: Long) {
+        val ctx = appContext
+        val session = _uiState.value.activePlayerSession
+        _uiState.update { it.copy(activePlayerSession = null) }
+        if (ctx != null && session != null && (durationMs > 0L || positionMs > 0L)) {
+            val itemId = session.mediaItem.id
+            val jfConfig = _uiState.value.jellyfinConfig
+
+            viewModelScope.launch(Dispatchers.IO) {
+                JellyfinRepository.reportPlaybackStopped(jfConfig, itemId, positionMs)
+
+                PlaybackHistoryRepository.saveProgress(
+                    context = ctx,
+                    itemId = itemId,
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                    seriesId = session.seriesId,
+                    seasonNumber = session.seasonNumber,
+                    episodeNumber = session.episodeNumber,
+                    episodeTitle = session.subtitle,
+                    streamUrl = session.streamUrl,
+                    title = session.mediaItem.title(),
+                    posterUrl = session.mediaItem.posterUrl,
+                    backdropUrl = session.mediaItem.backdropUrl.ifBlank { session.mediaItem.posterUrl },
+                    category = if (session.seriesId.isNotBlank()) MediaCategory.SERIES.name else MediaCategory.MOVIE.name
+                )
+                val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
+                withContext(Dispatchers.Default) {
+                    _uiState.update { current ->
+                        recomputeDerivedState(
+                            current = current,
+                            movies = applyHistoryToItems(current.movies, updatedHistory),
+                            series = applyHistoryToItems(current.series, updatedHistory),
+                            playbackHistory = updatedHistory
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -994,6 +1021,9 @@ class LauncherViewModel : ViewModel() {
 
             if (syncRes.isSuccess) {
                 val lib = syncRes.getOrThrow()
+                if (lib.movies.isNotEmpty() || lib.series.isNotEmpty()) {
+                    hasSyncedJellyfinThisSession = true
+                }
                 if (lib.movies.isEmpty() && lib.series.isEmpty() && (_uiState.value.movies.isNotEmpty() || _uiState.value.series.isNotEmpty())) {
                     Log.w("AbyssJellyfin", "Sync returned empty items; preserving existing cached library")
                     _uiState.update { it.copy(isSyncingJellyfin = false) }
@@ -1012,16 +1042,17 @@ class LauncherViewModel : ViewModel() {
                 }
 
                 withContext(Dispatchers.Default) {
-                    val derived = recomputeDerivedState(
-                        current = _uiState.value.copy(
-                            jellyfinConfig = updatedConfig,
-                            isSyncingJellyfin = false,
-                            continueWatchingItems = resumeItems
-                        ),
-                        movies = lib.movies,
-                        series = lib.series
-                    )
-                    _uiState.value = derived
+                    _uiState.update { current ->
+                        recomputeDerivedState(
+                            current = current.copy(
+                                jellyfinConfig = updatedConfig,
+                                isSyncingJellyfin = false,
+                                continueWatchingItems = resumeItems
+                            ),
+                            movies = lib.movies,
+                            series = lib.series
+                        )
+                    }
                 }
                 if (showToast) {
                     withContext(Dispatchers.Main) {
@@ -1083,10 +1114,19 @@ class LauncherViewModel : ViewModel() {
             }
 
             Log.d("AbyssSeer", "Syncing Seer data from ${activeConfig.serverUrl}...")
-            var trendingRes = runCatching { SeerRepository.fetchTrending(activeConfig) }
-            var popMoviesRes = runCatching { SeerRepository.fetchDiscoverMovies(activeConfig) }
-            var popTvRes = runCatching { SeerRepository.fetchDiscoverTv(activeConfig) }
-            var requestsRes = runCatching { SeerRepository.fetchRequests(activeConfig) }
+            suspend fun fetchSeerBatch(cfg: SeerConfig) = coroutineScope {
+                val t = async { runCatching { SeerRepository.fetchTrending(cfg) } }
+                val m = async { runCatching { SeerRepository.fetchDiscoverMovies(cfg) } }
+                val tv = async { runCatching { SeerRepository.fetchDiscoverTv(cfg) } }
+                val r = async { runCatching { SeerRepository.fetchRequests(cfg) } }
+                listOf(t.await(), m.await(), tv.await(), r.await())
+            }
+
+            var batch = fetchSeerBatch(activeConfig)
+            var trendingRes = batch[0]
+            var popMoviesRes = batch[1]
+            var popTvRes = batch[2]
+            var requestsRes = batch[3]
 
             // Auto-heal: If auth failed or results are empty and we have Jellyfin credentials, re-authenticate via Jellyfin
             val isAuthFailed = listOf(trendingRes, popMoviesRes, popTvRes, requestsRes).any {
@@ -1102,10 +1142,11 @@ class LauncherViewModel : ViewModel() {
                     prefs?.seerConfig = activeConfig
                     _uiState.update { it.copy(seerConfig = activeConfig) }
 
-                    trendingRes = runCatching { SeerRepository.fetchTrending(activeConfig) }
-                    popMoviesRes = runCatching { SeerRepository.fetchDiscoverMovies(activeConfig) }
-                    popTvRes = runCatching { SeerRepository.fetchDiscoverTv(activeConfig) }
-                    requestsRes = runCatching { SeerRepository.fetchRequests(activeConfig) }
+                    batch = fetchSeerBatch(activeConfig)
+                    trendingRes = batch[0]
+                    popMoviesRes = batch[1]
+                    popTvRes = batch[2]
+                    requestsRes = batch[3]
                 }
             }
 
@@ -1120,6 +1161,9 @@ class LauncherViewModel : ViewModel() {
             if (trending.isEmpty() && popMovies.isEmpty() && popTv.isEmpty() && _uiState.value.seerTrending.isNotEmpty()) {
                 Log.w("AbyssSeer", "Seer sync returned empty; preserving existing cached items")
                 return@launch
+            }
+            if (trending.isNotEmpty() || popMovies.isNotEmpty() || popTv.isNotEmpty()) {
+                hasSyncedSeerThisSession = true
             }
 
             val curMovies = _uiState.value.movies
@@ -1147,15 +1191,17 @@ class LauncherViewModel : ViewModel() {
             }
 
             withContext(Dispatchers.Default) {
-                val updatedState = _uiState.value.copy(
-                    seerConfig = updatedConfig,
-                    seerTrending = enrichedTrending,
-                    seerPopularMovies = enrichedPopMovies,
-                    seerPopularTv = enrichedPopTv,
-                    seerRequests = requests
-                )
-                val derived = recomputeDerivedState(updatedState)
-                _uiState.value = derived
+                _uiState.update { current ->
+                    recomputeDerivedState(
+                        current.copy(
+                            seerConfig = updatedConfig,
+                            seerTrending = enrichedTrending,
+                            seerPopularMovies = enrichedPopMovies,
+                            seerPopularTv = enrichedPopTv,
+                            seerRequests = requests
+                        )
+                    )
+                }
             }
 
             startSeerPolling(activeConfig)
@@ -1202,8 +1248,16 @@ class LauncherViewModel : ViewModel() {
 
         viewModelScope.launch(Dispatchers.IO) {
             val apps = AppRepository.loadInstalledApps(context, pinned, hidden)
-            withContext(Dispatchers.Main) {
-                _uiState.update { it.copy(allApps = apps) }
+            val pinned = apps.filter { it.isPinned && !it.isHidden }.sortedBy { it.pinOrder }
+            val visible = apps.filter { !it.isHidden }
+            val hiddenList = apps.filter { it.isHidden }
+            _uiState.update {
+                it.copy(
+                    allApps = apps,
+                    pinnedApps = pinned,
+                    visibleApps = visible,
+                    hiddenAppsList = hiddenList
+                )
             }
         }
     }
@@ -1285,17 +1339,16 @@ class LauncherViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             PlaybackHistoryRepository.clearEntry(ctx, item.id)
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
-            val filteredJfResume = _uiState.value.continueWatchingItems.filter { it.id != item.id }
-
             withContext(Dispatchers.Default) {
-                val derived = recomputeDerivedState(
-                    current = _uiState.value.copy(
-                        selectedMediaForMenu = null,
-                        continueWatchingItems = filteredJfResume
-                    ),
-                    playbackHistory = updatedHistory
-                )
-                _uiState.value = derived
+                _uiState.update { current ->
+                    recomputeDerivedState(
+                        current = current.copy(
+                            selectedMediaForMenu = null,
+                            continueWatchingItems = current.continueWatchingItems.filter { it.id != item.id }
+                        ),
+                        playbackHistory = updatedHistory
+                    )
+                }
             }
             showStatusMessage(R.string.msg_removed_continue, durationMs = 2500L)
         }
@@ -1330,13 +1383,14 @@ class LauncherViewModel : ViewModel() {
 
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
             withContext(Dispatchers.Default) {
-                val derived = recomputeDerivedState(
-                    current = _uiState.value.copy(selectedMediaForMenu = null),
-                    movies = applyHistoryToItems(_uiState.value.movies, updatedHistory),
-                    series = applyHistoryToItems(_uiState.value.series, updatedHistory),
-                    playbackHistory = updatedHistory
-                )
-                _uiState.value = derived
+                _uiState.update { current ->
+                    recomputeDerivedState(
+                        current = current.copy(selectedMediaForMenu = null),
+                        movies = applyHistoryToItems(current.movies, updatedHistory),
+                        series = applyHistoryToItems(current.series, updatedHistory),
+                        playbackHistory = updatedHistory
+                    )
+                }
             }
         }
     }
@@ -1351,7 +1405,12 @@ class LauncherViewModel : ViewModel() {
             true
         }
         prefs?.watchlistIds = currentIds
-        _uiState.update { it.copy(watchlistIds = currentIds) }
+        _uiState.update { current ->
+            current.copy(
+                watchlistIds = currentIds,
+                watchlistItems = (current.movies + current.series).filter { currentIds.contains(it.id) }
+            )
+        }
         showStatusMessage(if (isAdded) R.string.msg_added_watchlist else R.string.msg_removed_watchlist, durationMs = 2000L)
     }
 
@@ -1387,22 +1446,24 @@ class LauncherViewModel : ViewModel() {
             )
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
             withContext(Dispatchers.Default) {
-                val derived = recomputeDerivedState(
-                    current = _uiState.value,
-                    movies = applyHistoryToItems(_uiState.value.movies, updatedHistory),
-                    series = applyHistoryToItems(_uiState.value.series, updatedHistory),
-                    playbackHistory = updatedHistory
-                )
-                _uiState.value = derived
+                _uiState.update { current ->
+                    recomputeDerivedState(
+                        current = current,
+                        movies = applyHistoryToItems(current.movies, updatedHistory),
+                        series = applyHistoryToItems(current.series, updatedHistory),
+                        playbackHistory = updatedHistory
+                    )
+                }
             }
 
             showStatusMessage(R.string.msg_all_prev_watched, durationMs = 2500L)
 
             val targetIdx = allEpisodes.indexOfFirst { it.id == targetEpisode.id }
             if (targetIdx != -1) {
-                for (i in 0..targetIdx) {
-                    val ep = allEpisodes[i]
-                    JellyfinRepository.markWatched(jfConfig, ep.id)
+                coroutineScope {
+                    (0..targetIdx).map { i ->
+                        async { JellyfinRepository.markWatched(jfConfig, allEpisodes[i].id) }
+                    }.awaitAll()
                 }
             }
         }
@@ -1445,13 +1506,14 @@ class LauncherViewModel : ViewModel() {
 
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
             withContext(Dispatchers.Default) {
-                val derived = recomputeDerivedState(
-                    current = _uiState.value,
-                    movies = applyHistoryToItems(_uiState.value.movies, updatedHistory),
-                    series = applyHistoryToItems(_uiState.value.series, updatedHistory),
-                    playbackHistory = updatedHistory
-                )
-                _uiState.value = derived
+                _uiState.update { current ->
+                    recomputeDerivedState(
+                        current = current,
+                        movies = applyHistoryToItems(current.movies, updatedHistory),
+                        series = applyHistoryToItems(current.series, updatedHistory),
+                        playbackHistory = updatedHistory
+                    )
+                }
             }
             val epCode = "S${targetEpisode.seasonNumber.toString().padStart(2, '0')}E${targetEpisode.episodeNumber.toString().padStart(2, '0')}"
             val resId = if (isCurrentlyWatched) R.string.msg_marked_unwatched else R.string.msg_marked_watched
@@ -1487,22 +1549,24 @@ class LauncherViewModel : ViewModel() {
 
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
             withContext(Dispatchers.Default) {
-                val derived = recomputeDerivedState(
-                    current = _uiState.value,
-                    movies = applyHistoryToItems(_uiState.value.movies, updatedHistory),
-                    series = applyHistoryToItems(_uiState.value.series, updatedHistory),
-                    playbackHistory = updatedHistory
-                )
-                _uiState.value = derived
+                _uiState.update { current ->
+                    recomputeDerivedState(
+                        current = current,
+                        movies = applyHistoryToItems(current.movies, updatedHistory),
+                        series = applyHistoryToItems(current.series, updatedHistory),
+                        playbackHistory = updatedHistory
+                    )
+                }
             }
 
             showStatusMessage(R.string.msg_all_following_unwatched, durationMs = 2500L)
 
             val targetIdx = allEpisodes.indexOfFirst { it.id == targetEpisode.id }
             if (targetIdx != -1) {
-                for (i in targetIdx until allEpisodes.size) {
-                    val ep = allEpisodes[i]
-                    JellyfinRepository.markUnwatched(jfConfig, ep.id)
+                coroutineScope {
+                    (targetIdx until allEpisodes.size).map { i ->
+                        async { JellyfinRepository.markUnwatched(jfConfig, allEpisodes[i].id) }
+                    }.awaitAll()
                 }
             }
         }
@@ -1659,13 +1723,6 @@ class LauncherViewModel : ViewModel() {
         _uiState.update { it.copy(activeCatalogSelection = null) }
     }
 
-    fun onResume() {
-        if (needsAppRefreshOnResume) {
-            needsAppRefreshOnResume = false
-            refreshAppsList()
-        }
-    }
-
     private fun refreshAppsList() {
         val ctx = appContext ?: return
         val preferences = prefs ?: return
@@ -1675,79 +1732,27 @@ class LauncherViewModel : ViewModel() {
                 preferences.pinnedPackages,
                 preferences.hiddenPackages
             )
-            _uiState.update { it.copy(allApps = apps) }
-        }
-    }
-
-    private var searchJob: Job? = null
-    fun updateSearchQuery(query: String) {
-        _uiState.update { it.copy(searchQuery = query) }
-        searchJob?.cancel()
-        val q = query.trim()
-        if (q.isBlank()) {
-            _uiState.update { it.copy(searchResults = emptyList(), isSearching = false) }
-            return
-        }
-
-        searchJob = viewModelScope.launch(Dispatchers.IO) {
-            _uiState.update { it.copy(isSearching = true) }
-            val qLower = q.lowercase()
-
-            // 1. Direct Jellyfin Remote Search (or fallback to cached movies/series)
-            val jfConfig = _uiState.value.jellyfinConfig
-            val jfRemoteResults = if (jfConfig.isConfigured) {
-                JellyfinRepository.search(jfConfig, q)
-            } else emptyList()
-
-            val matchedMov = if (jfRemoteResults.isEmpty()) {
-                _uiState.value.movies.filter {
-                    it.title.lowercase().contains(qLower)
-                }
-            } else emptyList()
-            val matchedSer = if (jfRemoteResults.isEmpty()) {
-                _uiState.value.series.filter {
-                    it.title.lowercase().contains(qLower)
-                }
-            } else emptyList()
-
-            // 2. Seer Search if configured
-            val seerResults = if (_uiState.value.seerConfig.isConfigured) {
-                SeerRepository.search(_uiState.value.seerConfig, q)
-            } else emptyList()
-
-            val combined = (jfRemoteResults + matchedMov + matchedSer + seerResults).distinctBy { it.id }
-
+            val pinned = apps.filter { it.isPinned && !it.isHidden }.sortedBy { it.pinOrder }
+            val visible = apps.filter { !it.isHidden }
+            val hiddenList = apps.filter { it.isHidden }
             _uiState.update {
                 it.copy(
-                    searchResults = combined,
-                    isSearching = false
+                    allApps = apps,
+                    pinnedApps = pinned,
+                    visibleApps = visible,
+                    hiddenAppsList = hiddenList
                 )
             }
         }
     }
 
-    fun commitSearchQuery(query: String) {
-        val q = query.trim()
-        if (q.isBlank()) return
-        val current = _uiState.value.searchHistory.toMutableList()
-        current.remove(q)
-        current.add(0, q)
-        val trimmed = current.take(15)
-        prefs?.searchHistory = trimmed
-        _uiState.update { it.copy(searchHistory = trimmed) }
-    }
+    fun updateSearchQuery(query: String) = searchDelegate.updateSearchQuery(query)
 
-    fun clearSearchHistory() {
-        prefs?.searchHistory = emptyList()
-        _uiState.update { it.copy(searchHistory = emptyList()) }
-    }
+    fun commitSearchQuery(query: String) = searchDelegate.commitSearchQuery(query)
 
-    fun removeSearchHistoryItem(item: String) {
-        val current = _uiState.value.searchHistory.toMutableList()
-        current.remove(item)
-        prefs?.searchHistory = current
-        _uiState.update { it.copy(searchHistory = current) }
-    }
+    fun clearSearchHistory() = searchDelegate.clearSearchHistory()
+
+    fun removeSearchHistoryItem(item: String) = searchDelegate.removeSearchHistoryItem(item)
 
     fun showStatusMessage(resId: Int, vararg args: Any, durationMs: Long = 2500L) {
         showStatusMessage(UiMessage.Resource(resId, args.toList()), durationMs)
@@ -1757,8 +1762,11 @@ class LauncherViewModel : ViewModel() {
         showStatusMessage(UiMessage.Text(message), durationMs)
     }
 
+    private var statusMessageJob: Job? = null
+
     fun showStatusMessage(msg: UiMessage, durationMs: Long = 2500L) {
-        viewModelScope.launch {
+        statusMessageJob?.cancel()
+        statusMessageJob = viewModelScope.launch {
             _uiState.update { it.copy(statusBannerMessage = msg) }
             delay(durationMs)
             _uiState.update {
@@ -1767,83 +1775,38 @@ class LauncherViewModel : ViewModel() {
         }
     }
 
-    fun checkForUpdates(silent: Boolean = false) {
-        if (_uiState.value.isCheckingUpdates) return
-        _uiState.update { it.copy(isCheckingUpdates = true) }
-        viewModelScope.launch {
-            AppUpdateRepository.checkLatestRelease()
-                .onSuccess { update ->
-                    _uiState.update { it.copy(isCheckingUpdates = false) }
-                    if (update != null) {
-                        _uiState.update {
-                            it.copy(
-                                pendingUpdate = update,
-                                updateError = null,
-                                isDownloadingUpdate = false,
-                                updateDownloadProgress = 0f
-                            )
-                        }
-                    } else if (!silent) {
-                        showStatusMessage(R.string.update_already_latest, BuildConfig.VERSION_NAME)
-                    }
+    private fun registerNetworkSyncCallback(ctx: Context) {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val state = _uiState.value
+                if (state.jellyfinConfig.isConfigured && !hasSyncedJellyfinThisSession && !state.isSyncingJellyfin) {
+                    syncJellyfinLibrary(state.jellyfinConfig, showToast = false)
                 }
-                .onFailure {
-                    _uiState.update { it.copy(isCheckingUpdates = false) }
-                    if (!silent) {
-                        showStatusMessage(R.string.update_check_failed)
-                    }
+                if (state.seerConfig.isConfigured && !hasSyncedSeerThisSession) {
+                    syncSeerData(state.seerConfig)
                 }
-        }
-    }
-
-    fun dismissUpdate() {
-        _uiState.update {
-            it.copy(
-                pendingUpdate = null,
-                isDownloadingUpdate = false,
-                updateDownloadProgress = 0f,
-                updateError = null
-            )
-        }
-    }
-
-    fun downloadAndInstallUpdate(context: Context) {
-        val update = _uiState.value.pendingUpdate
-        Log.d("AbyssUpdate", "downloadAndInstallUpdate triggered: $update")
-        if (update == null || _uiState.value.isDownloadingUpdate) return
-
-        _uiState.update {
-            it.copy(
-                isDownloadingUpdate = true,
-                updateDownloadProgress = 0f,
-                updateError = null
-            )
-        }
-        viewModelScope.launch {
-            Log.d("AbyssUpdate", "Downloading APK from: ${update.apkUrl}")
-            AppUpdateRepository.downloadApk(context, update.apkUrl) { progress ->
-                _uiState.update { it.copy(updateDownloadProgress = progress) }
-            }.onSuccess { apkFile ->
-                Log.d("AbyssUpdate", "Download successful: ${apkFile.absolutePath} (${apkFile.length()} bytes)")
-                _uiState.update { it.copy(isDownloadingUpdate = false) }
-                AppUpdateRepository.triggerInstall(context, apkFile).onSuccess {
-                    // Close update modal once package installer is active
-                    dismissUpdate()
-                }.onFailure { error ->
-                    Log.e("AbyssUpdate", "Install trigger failed", error)
-                    _uiState.update {
-                        it.copy(updateError = error.localizedMessage ?: "Installation failed")
-                    }
-                }
-            }.onFailure { error ->
-                Log.e("AbyssUpdate", "Download failed", error)
-                _uiState.update {
-                    it.copy(
-                        isDownloadingUpdate = false,
-                        updateError = error.localizedMessage ?: "Download failed"
-                    )
+                if (state.weatherInfo == null) {
+                    fetchWeather(state.weatherCity)
                 }
             }
         }
+        networkCallback = cb
+        runCatching { cm.registerDefaultNetworkCallback(cb) }
     }
+
+    override fun onCleared() {
+        super.onCleared()
+        networkCallback?.let { cb ->
+            val cm = appContext?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            runCatching { cm?.unregisterNetworkCallback(cb) }
+        }
+        networkCallback = null
+    }
+
+    fun checkForUpdates(silent: Boolean = false) = updateDelegate.checkForUpdates(silent)
+
+    fun dismissUpdate() = updateDelegate.dismissUpdate()
+
+    fun downloadAndInstallUpdate(context: Context) = updateDelegate.downloadAndInstallUpdate(context)
 }
