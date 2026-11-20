@@ -21,11 +21,6 @@ import dev.dylanakp.abysstvlauncher.player.PlayerManagerImpl
 import dev.dylanakp.abysstvlauncher.remote.RemoteHttpServer
 import dev.dylanakp.abysstvlauncher.remote.TvCommandController
 import dev.dylanakp.abysstvlauncher.ui.LauncherViewModel
-import dev.dylanakp.abysstvlauncher.ui.viewmodels.CatalogViewModel
-import dev.dylanakp.abysstvlauncher.ui.viewmodels.DiscoverViewModel
-import dev.dylanakp.abysstvlauncher.ui.viewmodels.HomeViewModel
-import dev.dylanakp.abysstvlauncher.ui.viewmodels.PlayerViewModel
-import dev.dylanakp.abysstvlauncher.ui.viewmodels.SettingsViewModel
 import kotlinx.serialization.json.Json
 import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
@@ -80,15 +75,10 @@ val appModule = module {
     single<IPlaybackHistoryRepository> { PlaybackHistoryRepository }
     single { AppUpdateRepository }
 
-    single<PlayerManager> { PlayerManagerImpl(androidContext()) }
+    single<PlayerManager> { PlayerManagerImpl(androidContext(), get()) }
 
     single { TvCommandController(androidContext(), get(), get(), get(), get(), get()) }
     single { RemoteHttpServer(androidContext(), get(), get()) }
 
     viewModelOf(::LauncherViewModel)
-    viewModelOf(::HomeViewModel)
-    viewModelOf(::CatalogViewModel)
-    viewModelOf(::DiscoverViewModel)
-    viewModelOf(::SettingsViewModel)
-    viewModelOf(::PlayerViewModel)
 }
