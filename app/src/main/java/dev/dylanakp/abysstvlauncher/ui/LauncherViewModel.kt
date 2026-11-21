@@ -13,7 +13,11 @@ import dev.dylanakp.abysstvlauncher.BuildConfig
 import dev.dylanakp.abysstvlauncher.data.AppRepository
 import dev.dylanakp.abysstvlauncher.data.AppUpdate
 import dev.dylanakp.abysstvlauncher.data.AppUpdateRepository
+import dev.dylanakp.abysstvlauncher.data.JellyfinPlaystateCommand
+import dev.dylanakp.abysstvlauncher.data.JellyfinPlaystateEvent
 import dev.dylanakp.abysstvlauncher.data.JellyfinRepository
+import dev.dylanakp.abysstvlauncher.data.JellyfinWebSocketClient
+import dev.dylanakp.abysstvlauncher.player.PlayerManager
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
@@ -30,6 +34,7 @@ import dev.dylanakp.abysstvlauncher.model.AbyssAccentPreset
 import dev.dylanakp.abysstvlauncher.model.AbyssNavTab
 import dev.dylanakp.abysstvlauncher.model.AppLanguage
 import dev.dylanakp.abysstvlauncher.model.JellyfinConfig
+import dev.dylanakp.abysstvlauncher.model.JellyfinDisplayMessage
 import dev.dylanakp.abysstvlauncher.model.MediaCategory
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.PlaybackHistoryEntry
@@ -122,6 +127,7 @@ data class LauncherUiState(
     val isSearching: Boolean = false,
     val searchHistory: List<String> = emptyList(),
     val statusBannerMessage: UiMessage? = null,
+    val jellyfinDisplayMessage: JellyfinDisplayMessage? = null,
     val activeCatalogSelection: dev.dylanakp.abysstvlauncher.ui.components.CatalogSelection? = null,
     val pendingUpdate: AppUpdate? = null,
     val isCheckingUpdates: Boolean = false,
@@ -137,7 +143,10 @@ data class LauncherUiState(
         } else null
 }
 
-class LauncherViewModel : ViewModel() {
+class LauncherViewModel(
+    private val jellyfinWebSocketClient: JellyfinWebSocketClient,
+    private val playerManager: PlayerManager
+) : ViewModel() {
 
     private var prefs: LauncherPreferences? = null
     private var appContext: Context? = null
@@ -165,6 +174,16 @@ class LauncherViewModel : ViewModel() {
         isInitialized = true
         appContext = context.applicationContext
         registerNetworkSyncCallback(context.applicationContext)
+        viewModelScope.launch {
+            jellyfinWebSocketClient.displayMessages.collect { msg ->
+                showJellyfinDisplayMessage(msg)
+            }
+        }
+        viewModelScope.launch(Dispatchers.Main) {
+            jellyfinWebSocketClient.playstateCommands.collect { event ->
+                handleJellyfinPlaystate(event)
+            }
+        }
         val preferences = prefs ?: LauncherPreferences(context).also { prefs = it }
 
         // 1. Await DataStore load, then parallel load of disk cache, playback history, and installed apps on IO
@@ -254,6 +273,9 @@ class LauncherViewModel : ViewModel() {
 
             // 2. Auto-sync Jellyfin library if configured
             if (jfConfig.isConfigured) {
+                if (jfConfig.accessToken.isNotBlank()) {
+                    jellyfinWebSocketClient.connect(jfConfig)
+                }
                 syncJellyfinLibrary(jfConfig, showToast = false)
             }
 
@@ -985,6 +1007,7 @@ class LauncherViewModel : ViewModel() {
                     val authed = authRes.getOrThrow()
                     prefs?.jellyfinConfig = authed
                     _uiState.update { it.copy(jellyfinConfig = authed) }
+                    jellyfinWebSocketClient.connect(authed)
                     authed
                 } else {
                     withContext(Dispatchers.Main) {
@@ -1013,6 +1036,7 @@ class LauncherViewModel : ViewModel() {
                     activeConfig = reAuthRes.getOrThrow()
                     prefs?.jellyfinConfig = activeConfig
                     _uiState.update { it.copy(jellyfinConfig = activeConfig) }
+                    jellyfinWebSocketClient.connect(activeConfig)
                     syncRes = JellyfinRepository.syncLibrary(activeConfig)
                 }
             }
@@ -1294,6 +1318,9 @@ class LauncherViewModel : ViewModel() {
     fun onActivityResumed() {
         val jfConfig = _uiState.value.jellyfinConfig
         if (jfConfig.isConfigured) {
+            if (jfConfig.accessToken.isNotBlank()) {
+                jellyfinWebSocketClient.reconnectIfNeeded()
+            }
             viewModelScope.launch(Dispatchers.IO) {
                 val resumeItems = JellyfinRepository.fetchResumeAndNextUp(jfConfig)
                 if (resumeItems.isNotEmpty()) {
@@ -1763,6 +1790,40 @@ class LauncherViewModel : ViewModel() {
     }
 
     private var statusMessageJob: Job? = null
+    private var jellyfinDisplayMessageJob: Job? = null
+
+    fun showJellyfinDisplayMessage(msg: JellyfinDisplayMessage) {
+        jellyfinDisplayMessageJob?.cancel()
+        jellyfinDisplayMessageJob = viewModelScope.launch {
+            _uiState.update { it.copy(jellyfinDisplayMessage = msg) }
+            delay(msg.timeoutMs)
+            _uiState.update {
+                if (it.jellyfinDisplayMessage?.id == msg.id) it.copy(jellyfinDisplayMessage = null) else it
+            }
+        }
+    }
+
+    fun dismissJellyfinDisplayMessage() {
+        jellyfinDisplayMessageJob?.cancel()
+        _uiState.update { it.copy(jellyfinDisplayMessage = null) }
+    }
+
+    private fun handleJellyfinPlaystate(event: JellyfinPlaystateEvent) {
+        if (_uiState.value.activePlayerSession == null) return
+        when (event.command) {
+            JellyfinPlaystateCommand.PAUSE -> playerManager.pause()
+            JellyfinPlaystateCommand.UNPAUSE -> playerManager.play()
+            JellyfinPlaystateCommand.PLAY_PAUSE -> playerManager.togglePlayPause()
+            JellyfinPlaystateCommand.SEEK -> event.seekPositionMs?.let { playerManager.seekTo(it) }
+            JellyfinPlaystateCommand.FAST_FORWARD -> playerManager.seekBy(10_000L)
+            JellyfinPlaystateCommand.REWIND -> playerManager.seekBy(-10_000L)
+            JellyfinPlaystateCommand.STOP -> {
+                val posMs = playerManager.positionState.value.currentPositionMs
+                val durMs = playerManager.state.value.durationMs
+                closePlayer(posMs, durMs)
+            }
+        }
+    }
 
     fun showStatusMessage(msg: UiMessage, durationMs: Long = 2500L) {
         statusMessageJob?.cancel()
@@ -1780,8 +1841,13 @@ class LauncherViewModel : ViewModel() {
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 val state = _uiState.value
-                if (state.jellyfinConfig.isConfigured && !hasSyncedJellyfinThisSession && !state.isSyncingJellyfin) {
-                    syncJellyfinLibrary(state.jellyfinConfig, showToast = false)
+                if (state.jellyfinConfig.isConfigured) {
+                    if (state.jellyfinConfig.accessToken.isNotBlank()) {
+                        jellyfinWebSocketClient.reconnectIfNeeded()
+                    }
+                    if (!hasSyncedJellyfinThisSession && !state.isSyncingJellyfin) {
+                        syncJellyfinLibrary(state.jellyfinConfig, showToast = false)
+                    }
                 }
                 if (state.seerConfig.isConfigured && !hasSyncedSeerThisSession) {
                     syncSeerData(state.seerConfig)
@@ -1797,6 +1863,7 @@ class LauncherViewModel : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
+        jellyfinWebSocketClient.disconnect()
         networkCallback?.let { cb ->
             val cm = appContext?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             runCatching { cm?.unregisterNetworkCallback(cb) }
