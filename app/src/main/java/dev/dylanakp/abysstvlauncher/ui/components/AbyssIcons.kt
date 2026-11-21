@@ -1,12 +1,13 @@
 package dev.dylanakp.abysstvlauncher.ui.components
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -120,57 +121,65 @@ fun AbyssIcon(
         return
     }
 
-    Canvas(modifier = modifier.size(size)) {
-        val w = this.size.width
-        val h = this.size.height
-        val strokeWidth = (w * 0.115f).coerceAtLeast(1.5f)
-        val stroke = Stroke(
-            width = strokeWidth,
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round
-        )
-
-        when (type) {
-            AbyssIconType.PLAY -> drawPlay(w, h, color)
-            AbyssIconType.PAUSE -> drawPause(w, h, color)
-            AbyssIconType.SEEK_BACK_10 -> drawSeekBack(w, h, color, stroke)
-            AbyssIconType.SEEK_FORWARD_10 -> drawSeekForward(w, h, color, stroke)
-            AbyssIconType.SKIP_NEXT -> drawSkipNext(w, h, color, strokeWidth)
-            AbyssIconType.AUDIO_SPEAKER -> drawAudioSpeaker(w, h, color, stroke)
-            AbyssIconType.SUBTITLES_CC -> drawSubtitlesCc(w, h, color, stroke)
-            AbyssIconType.TV_CHANNELS -> drawTvChannels(w, h, color, stroke)
-            AbyssIconType.CLOSE -> drawClose(w, h, color, stroke)
-            AbyssIconType.CHECK -> drawCheck(w, h, color, stroke)
-            AbyssIconType.RESTART -> drawRestart(w, h, color, stroke)
-            AbyssIconType.EXTERNAL_LINK -> drawExternalLink(w, h, color, stroke)
-            AbyssIconType.SEARCH -> drawSearch(w, h, color, stroke)
-            AbyssIconType.SETTINGS -> drawSettings(w, h, color, stroke)
-            AbyssIconType.STAR_FILLED -> drawStar(w, h, color, filled = true, stroke = stroke)
-            AbyssIconType.STAR_OUTLINE -> drawStar(w, h, color, filled = false, stroke = stroke)
-            AbyssIconType.PIN -> drawPin(w, h, color, stroke, crossed = false)
-            AbyssIconType.UNPIN -> drawPin(w, h, color, stroke, crossed = true)
-            AbyssIconType.EYE -> drawEye(w, h, color, stroke, crossed = false)
-            AbyssIconType.EYE_OFF -> drawEye(w, h, color, stroke, crossed = true)
-            AbyssIconType.ARROW_LEFT -> drawArrowHorizontal(w, h, color, stroke, left = true)
-            AbyssIconType.ARROW_RIGHT -> drawArrowHorizontal(w, h, color, stroke, left = false)
-            AbyssIconType.CHEVRON_DOWN -> drawChevronDown(w, h, color, stroke)
-            AbyssIconType.INFO -> drawInfo(w, h, color, stroke)
-            AbyssIconType.WIFI -> drawWifi(w, h, color, stroke)
-            AbyssIconType.BLUETOOTH -> drawBluetooth(w, h, color, stroke)
-            AbyssIconType.DISPLAY -> drawDisplay(w, h, color, stroke)
-            AbyssIconType.APPS_GRID -> drawAppsGrid(w, h, color, stroke)
-            AbyssIconType.HOME -> drawHome(w, h, color, stroke)
-            AbyssIconType.SERVER -> drawServer(w, h, color, stroke)
-            AbyssIconType.GLOBE -> drawGlobe(w, h, color, stroke)
-            AbyssIconType.REMOTE -> drawRemote(w, h, color, stroke)
-            AbyssIconType.DOWNLOAD -> drawDownload(w, h, color, stroke)
-            AbyssIconType.SPARKLE -> drawSparkle(w, h, color)
-        }
-    }
+    Box(
+        modifier = modifier
+            .size(size)
+            .drawWithCache {
+                val w = this.size.width
+                val h = this.size.height
+                val strokeWidth = (w * 0.115f).coerceAtLeast(1.5f)
+                val stroke = Stroke(
+                    width = strokeWidth,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round
+                )
+                onDrawBehind {
+                    when (type) {
+                        AbyssIconType.PLAY -> drawPlay(w, h, color)
+                        AbyssIconType.PAUSE -> drawPause(w, h, color)
+                        AbyssIconType.SEEK_BACK_10 -> drawSeekBack(w, h, color, stroke)
+                        AbyssIconType.SEEK_FORWARD_10 -> drawSeekForward(w, h, color, stroke)
+                        AbyssIconType.SKIP_NEXT -> drawSkipNext(w, h, color, strokeWidth)
+                        AbyssIconType.AUDIO_SPEAKER -> drawAudioSpeaker(w, h, color, stroke)
+                        AbyssIconType.SUBTITLES_CC -> drawSubtitlesCc(w, h, color, stroke)
+                        AbyssIconType.TV_CHANNELS -> drawTvChannels(w, h, color, stroke)
+                        AbyssIconType.CLOSE -> drawClose(w, h, color, stroke)
+                        AbyssIconType.CHECK -> drawCheck(w, h, color, stroke)
+                        AbyssIconType.RESTART -> drawRestart(w, h, color, stroke)
+                        AbyssIconType.EXTERNAL_LINK -> drawExternalLink(w, h, color, stroke)
+                        AbyssIconType.SEARCH -> drawSearch(w, h, color, stroke)
+                        AbyssIconType.SETTINGS -> drawSettings(w, h, color, stroke)
+                        AbyssIconType.STAR_FILLED -> drawStar(w, h, color, filled = true, stroke = stroke)
+                        AbyssIconType.STAR_OUTLINE -> drawStar(w, h, color, filled = false, stroke = stroke)
+                        AbyssIconType.PIN -> drawPin(w, h, color, stroke, crossed = false)
+                        AbyssIconType.UNPIN -> drawPin(w, h, color, stroke, crossed = true)
+                        AbyssIconType.EYE -> drawEye(w, h, color, stroke, crossed = false)
+                        AbyssIconType.EYE_OFF -> drawEye(w, h, color, stroke, crossed = true)
+                        AbyssIconType.ARROW_LEFT -> drawArrowHorizontal(w, h, color, stroke, left = true)
+                        AbyssIconType.ARROW_RIGHT -> drawArrowHorizontal(w, h, color, stroke, left = false)
+                        AbyssIconType.CHEVRON_DOWN -> drawChevronDown(w, h, color, stroke)
+                        AbyssIconType.INFO -> drawInfo(w, h, color, stroke)
+                        AbyssIconType.WIFI -> drawWifi(w, h, color, stroke)
+                        AbyssIconType.BLUETOOTH -> drawBluetooth(w, h, color, stroke)
+                        AbyssIconType.DISPLAY -> drawDisplay(w, h, color, stroke)
+                        AbyssIconType.APPS_GRID -> drawAppsGrid(w, h, color, stroke)
+                        AbyssIconType.HOME -> drawHome(w, h, color, stroke)
+                        AbyssIconType.SERVER -> drawServer(w, h, color, stroke)
+                        AbyssIconType.GLOBE -> drawGlobe(w, h, color, stroke)
+                        AbyssIconType.REMOTE -> drawRemote(w, h, color, stroke)
+                        AbyssIconType.DOWNLOAD -> drawDownload(w, h, color, stroke)
+                        AbyssIconType.SPARKLE -> drawSparkle(w, h, color)
+                    }
+                }
+            }
+    )
 }
 
+private val iconScratchPath = Path()
+
 private fun DrawScope.drawPlay(w: Float, h: Float, color: Color) {
-    val path = Path().apply {
+    val path = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.24f, h * 0.16f)
         lineTo(w * 0.84f, h * 0.50f)
         lineTo(w * 0.24f, h * 0.84f)
@@ -200,7 +209,8 @@ private fun DrawScope.drawPause(w: Float, h: Float, color: Color) {
 
 private fun DrawScope.drawSeekBack(w: Float, h: Float, color: Color, stroke: Stroke) {
     // Double chevron pointing left (minimalist rewind)
-    val path = Path().apply {
+    val path = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.52f, h * 0.22f)
         lineTo(w * 0.20f, h * 0.50f)
         lineTo(w * 0.52f, h * 0.78f)
@@ -214,7 +224,8 @@ private fun DrawScope.drawSeekBack(w: Float, h: Float, color: Color, stroke: Str
 
 private fun DrawScope.drawSeekForward(w: Float, h: Float, color: Color, stroke: Stroke) {
     // Double chevron pointing right (minimalist fast-forward)
-    val path = Path().apply {
+    val path = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.16f, h * 0.22f)
         lineTo(w * 0.48f, h * 0.50f)
         lineTo(w * 0.16f, h * 0.78f)
@@ -227,7 +238,8 @@ private fun DrawScope.drawSeekForward(w: Float, h: Float, color: Color, stroke: 
 }
 
 private fun DrawScope.drawSkipNext(w: Float, h: Float, color: Color, strokeWidth: Float) {
-    val path = Path().apply {
+    val path = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.18f, h * 0.20f)
         lineTo(w * 0.66f, h * 0.50f)
         lineTo(w * 0.18f, h * 0.80f)
@@ -244,7 +256,8 @@ private fun DrawScope.drawSkipNext(w: Float, h: Float, color: Color, strokeWidth
 }
 
 private fun DrawScope.drawAudioSpeaker(w: Float, h: Float, color: Color, stroke: Stroke) {
-    val speaker = Path().apply {
+    val speaker = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.14f, h * 0.38f)
         lineTo(w * 0.32f, h * 0.38f)
         lineTo(w * 0.54f, h * 0.18f)
@@ -352,7 +365,8 @@ private fun DrawScope.drawClose(w: Float, h: Float, color: Color, stroke: Stroke
 }
 
 private fun DrawScope.drawCheck(w: Float, h: Float, color: Color, stroke: Stroke) {
-    val path = Path().apply {
+    val path = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.18f, h * 0.52f)
         lineTo(w * 0.42f, h * 0.76f)
         lineTo(w * 0.84f, h * 0.24f)
@@ -370,7 +384,8 @@ private fun DrawScope.drawRestart(w: Float, h: Float, color: Color, stroke: Stro
         size = Size(w * 0.68f, h * 0.68f),
         style = stroke
     )
-    val arrowHead = Path().apply {
+    val arrowHead = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.48f, h * 0.08f)
         lineTo(w * 0.66f, h * 0.22f)
         lineTo(w * 0.46f, h * 0.32f)
@@ -379,7 +394,8 @@ private fun DrawScope.drawRestart(w: Float, h: Float, color: Color, stroke: Stro
 }
 
 private fun DrawScope.drawExternalLink(w: Float, h: Float, color: Color, stroke: Stroke) {
-    val path = Path().apply {
+    val path = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.45f, h * 0.22f)
         lineTo(w * 0.78f, h * 0.22f)
         lineTo(w * 0.78f, h * 0.55f)
@@ -445,7 +461,8 @@ private fun DrawScope.drawSettings(w: Float, h: Float, color: Color, stroke: Str
 private fun DrawScope.drawSparkle(w: Float, h: Float, color: Color) {
     val cx = w * 0.5f
     val cy = h * 0.5f
-    val path = Path().apply {
+    val path = iconScratchPath.apply {
+        rewind()
         moveTo(cx, h * 0.12f)
         quadraticBezierTo(cx, cy, w * 0.88f, cy)
         quadraticBezierTo(cx, cy, cx, h * 0.88f)
@@ -461,7 +478,7 @@ private fun DrawScope.drawStar(w: Float, h: Float, color: Color, filled: Boolean
     val cy = h * 0.5f
     val outerR = w * 0.42f
     val innerR = w * 0.18f
-    val path = Path()
+    val path = iconScratchPath.apply { rewind() }
     for (i in 0 until 10) {
         val r = if (i % 2 == 0) outerR else innerR
         val angle = Math.toRadians((i * 36.0) - 90.0)
@@ -474,7 +491,8 @@ private fun DrawScope.drawStar(w: Float, h: Float, color: Color, filled: Boolean
 }
 
 private fun DrawScope.drawPin(w: Float, h: Float, color: Color, stroke: Stroke, crossed: Boolean) {
-    val path = Path().apply {
+    val path = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.30f, h * 0.18f)
         lineTo(w * 0.70f, h * 0.18f)
         lineTo(w * 0.64f, h * 0.48f)
@@ -491,7 +509,8 @@ private fun DrawScope.drawPin(w: Float, h: Float, color: Color, stroke: Stroke, 
 }
 
 private fun DrawScope.drawEye(w: Float, h: Float, color: Color, stroke: Stroke, crossed: Boolean) {
-    val path = Path().apply {
+    val path = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.10f, h * 0.50f)
         quadraticTo(w * 0.50f, h * 0.14f, w * 0.90f, h * 0.50f)
         quadraticTo(w * 0.50f, h * 0.86f, w * 0.10f, h * 0.50f)
@@ -505,7 +524,8 @@ private fun DrawScope.drawEye(w: Float, h: Float, color: Color, stroke: Stroke, 
 
 private fun DrawScope.drawArrowHorizontal(w: Float, h: Float, color: Color, stroke: Stroke, left: Boolean) {
     drawLine(color, Offset(w * 0.18f, h * 0.50f), Offset(w * 0.82f, h * 0.50f), stroke.width, StrokeCap.Round)
-    val head = Path().apply {
+    val head = iconScratchPath.apply {
+        rewind()
         if (left) {
             moveTo(w * 0.44f, h * 0.24f)
             lineTo(w * 0.18f, h * 0.50f)
@@ -520,7 +540,8 @@ private fun DrawScope.drawArrowHorizontal(w: Float, h: Float, color: Color, stro
 }
 
 private fun DrawScope.drawChevronDown(w: Float, h: Float, color: Color, stroke: Stroke) {
-    val path = Path().apply {
+    val path = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.22f, h * 0.36f)
         lineTo(w * 0.50f, h * 0.66f)
         lineTo(w * 0.78f, h * 0.36f)
@@ -561,7 +582,8 @@ private fun DrawScope.drawWifi(w: Float, h: Float, color: Color, stroke: Stroke)
 }
 
 private fun DrawScope.drawBluetooth(w: Float, h: Float, color: Color, stroke: Stroke) {
-    val path = Path().apply {
+    val path = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.28f, h * 0.30f)
         lineTo(w * 0.72f, h * 0.70f)
         lineTo(w * 0.50f, h * 0.88f)
@@ -594,7 +616,8 @@ private fun DrawScope.drawAppsGrid(w: Float, h: Float, color: Color, stroke: Str
 }
 
 private fun DrawScope.drawHome(w: Float, h: Float, color: Color, stroke: Stroke) {
-    val path = Path().apply {
+    val path = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.16f, h * 0.46f)
         lineTo(w * 0.50f, h * 0.18f)
         lineTo(w * 0.84f, h * 0.46f)
@@ -668,7 +691,8 @@ private fun DrawScope.drawRemote(w: Float, h: Float, color: Color, stroke: Strok
 private fun DrawScope.drawDownload(w: Float, h: Float, color: Color, stroke: Stroke) {
     // Arrow pointing down
     drawLine(color, Offset(w * 0.50f, h * 0.15f), Offset(w * 0.50f, h * 0.62f), stroke.width, StrokeCap.Round)
-    val chevronPath = Path().apply {
+    val chevronPath = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.28f, h * 0.44f)
         lineTo(w * 0.50f, h * 0.65f)
         lineTo(w * 0.72f, h * 0.44f)
@@ -676,7 +700,8 @@ private fun DrawScope.drawDownload(w: Float, h: Float, color: Color, stroke: Str
     drawPath(chevronPath, color = color, style = stroke)
 
     // Tray at bottom
-    val trayPath = Path().apply {
+    val trayPath = iconScratchPath.apply {
+        rewind()
         moveTo(w * 0.20f, h * 0.72f)
         lineTo(w * 0.20f, h * 0.85f)
         lineTo(w * 0.80f, h * 0.85f)

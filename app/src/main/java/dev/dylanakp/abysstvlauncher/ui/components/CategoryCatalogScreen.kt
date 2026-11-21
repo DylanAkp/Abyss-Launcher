@@ -92,12 +92,7 @@ fun CategoryCatalogScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        delay(100L)
-        try {
-            firstItemFocusRequester.requestFocus()
-        } catch (_: Exception) {}
-    }
+    RequestModalInitialFocus(firstItemFocusRequester, Unit)
 
     Column(
         modifier = modifier
@@ -251,14 +246,6 @@ private fun CatalogBackButton(
             .clip(RoundedCornerShape(50))
             .background(if (isFocused) Color.White else AbyssPillGlass)
             .onFocusChanged { isFocused = it.isFocused }
-            .onPreviewKeyEvent { event ->
-                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
-                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER
-                ) {
-                    onClick()
-                    true
-                } else false
-            }
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
@@ -273,7 +260,7 @@ private fun CatalogBackButton(
                 size = 14.dp
             )
             Text(
-                text = "Retour",
+                text = stringResource(dev.dylanakp.abysstvlauncher.R.string.btn_back),
                 style = MaterialTheme.typography.labelMedium.copy(
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 12.sp

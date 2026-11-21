@@ -59,20 +59,23 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
 import dev.dylanakp.abysstvlauncher.theme.AbyssSurfaceGlass
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
-import java.util.concurrent.ConcurrentHashMap
+import android.util.LruCache
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-private val appBannerBitmapCache = ConcurrentHashMap<String, ImageBitmap>()
-private val appIconBitmapCache = ConcurrentHashMap<String, ImageBitmap>()
+private val appBannerBitmapCache = LruCache<String, ImageBitmap>(64)
+private val appIconBitmapCache = LruCache<String, ImageBitmap>(64)
 
 fun prewarmAppBitmaps(apps: List<TvAppInfo>) {
     for (app in apps) {
-        if (app.banner != null && !appBannerBitmapCache.containsKey(app.packageName)) {
+        if (app.banner != null && appBannerBitmapCache.get(app.packageName) == null) {
             app.banner.toBitmapSafe(340, 196)?.asImageBitmap()?.let {
-                appBannerBitmapCache[app.packageName] = it
+                appBannerBitmapCache.put(app.packageName, it)
             }
-        } else if (app.icon != null && !appIconBitmapCache.containsKey(app.packageName)) {
+        } else if (app.icon != null && appIconBitmapCache.get(app.packageName) == null) {
             app.icon.toBitmapSafe(108, 108)?.asImageBitmap()?.let {
-                appIconBitmapCache[app.packageName] = it
+                appIconBitmapCache.put(app.packageName, it)
             }
         }
     }
@@ -86,17 +89,12 @@ fun AppCard(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null,
+    onNavigateUp: (() -> Boolean)? = null,
     onFocus: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var longPressConsumed by remember { mutableStateOf(false) }
-
-    val cardScale = animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1.0f,
-        animationSpec = tween(durationMillis = 80, easing = FastOutSlowInEasing),
-        label = "appCardScale"
-    )
+    val cardShape = remember { RoundedCornerShape(12.dp) }
 
     Column(
         modifier = modifier
@@ -118,12 +116,7 @@ fun AppCard(
 
                 when {
                     native.action == KeyEvent.ACTION_DOWN && native.keyCode == KeyEvent.KEYCODE_DPAD_UP -> {
-                        if (onNavigateUp != null) {
-                            onNavigateUp.invoke()
-                            true
-                        } else {
-                            false
-                        }
+                        onNavigateUp?.invoke() ?: false
                     }
                     isSelectKey && native.action == KeyEvent.ACTION_DOWN -> {
                         if (native.repeatCount == 0) {
@@ -162,15 +155,14 @@ fun AppCard(
                 .width(170.dp)
                 .height(98.dp)
                 .graphicsLayer {
-                    this.scaleX = cardScale.value
-                    this.scaleY = cardScale.value
+                    val s = if (isFocused) 1.05f else 1.0f
+                    this.scaleX = s
+                    this.scaleY = s
+                    this.shape = cardShape
+                    this.clip = true
                 }
-                .clip(RoundedCornerShape(12.dp))
                 .background(if (isFocused) Color(0x38FFFFFF) else AbyssSurfaceGlass)
-                .then(
-                    if (isFocused) Modifier.border(1.5.dp, Color.White, RoundedCornerShape(12.dp))
-                    else Modifier
-                ),
+                .border(1.5.dp, if (isFocused) Color.White else Color.Transparent, cardShape),
             contentAlignment = Alignment.Center
         ) {
             val isYouTubeVariant = app.packageName == "io.gh.reisxd.tizentube.cobalt" ||
@@ -183,18 +175,46 @@ fun AppCard(
                 app.banner.intrinsicWidth <= 0 || app.banner.intrinsicWidth >= app.banner.intrinsicHeight * 1.2f
             )
 
-            val bannerBmp = remember(app.packageName, app.banner, isWideBanner) {
-                if (!isWideBanner) null
-                else app.banner?.let { banner ->
-                    appBannerBitmapCache.getOrPut(app.packageName) {
-                        banner.toBitmapSafe(340, 196)?.asImageBitmap()
+            val bannerBmp by produceState<ImageBitmap?>(
+                initialValue = if (isWideBanner) appBannerBitmapCache.get(app.packageName) else null,
+                key1 = app.packageName,
+                key2 = isWideBanner
+            ) {
+                if (!isWideBanner) {
+                    value = null
+                    return@produceState
+                }
+                val cached = appBannerBitmapCache.get(app.packageName)
+                if (cached != null) {
+                    value = cached
+                    return@produceState
+                }
+                val banner = app.banner ?: return@produceState
+                value = withContext(Dispatchers.Default) {
+                    banner.toBitmapSafe(340, 196)?.asImageBitmap()?.also {
+                        appBannerBitmapCache.put(app.packageName, it)
                     }
                 }
             }
-            val iconBmp = remember(app.packageName, app.icon) {
-                if (app.icon == null || bannerBmp != null) null
-                else appIconBitmapCache.getOrPut(app.packageName) {
-                    app.icon.toBitmapSafe(108, 108)?.asImageBitmap() ?: return@remember null
+            val iconBmp by produceState<ImageBitmap?>(
+                initialValue = if (app.icon != null && !isWideBanner) appIconBitmapCache.get(app.packageName) else null,
+                key1 = app.packageName,
+                key2 = bannerBmp != null
+            ) {
+                if (app.icon == null || bannerBmp != null) {
+                    value = null
+                    return@produceState
+                }
+                val cached = appIconBitmapCache.get(app.packageName)
+                if (cached != null) {
+                    value = cached
+                    return@produceState
+                }
+                val icon = app.icon
+                value = withContext(Dispatchers.Default) {
+                    icon.toBitmapSafe(108, 108)?.asImageBitmap()?.also {
+                        appIconBitmapCache.put(app.packageName, it)
+                    }
                 }
             }
 
@@ -213,12 +233,14 @@ fun AppCard(
                     modifier = Modifier.fillMaxSize()
                 )
             } else if (bannerBmp != null) {
-                Image(
-                    bitmap = bannerBmp,
-                    contentDescription = app.label,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                bannerBmp?.let { bmp ->
+                    Image(
+                        bitmap = bmp,
+                        contentDescription = app.label,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             } else if (iconBmp != null || app.icon != null) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -232,9 +254,10 @@ fun AppCard(
                             .padding(4.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (iconBmp != null) {
+                        val resolvedIcon = iconBmp
+                        if (resolvedIcon != null) {
                             Image(
-                                bitmap = iconBmp,
+                                bitmap = resolvedIcon,
                                 contentDescription = app.label,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Fit
@@ -249,8 +272,10 @@ fun AppCard(
                                     .allowHardware(true)
                                     .build()
                             }
+                            val imageLoader = remember(context) { AbyssImagePipeline.getLoader(context) }
                             AsyncImage(
                                 model = iconRequest,
+                                imageLoader = imageLoader,
                                 contentDescription = app.label,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Fit

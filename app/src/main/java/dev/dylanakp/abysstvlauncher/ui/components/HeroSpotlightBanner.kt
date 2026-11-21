@@ -139,8 +139,8 @@ fun HeroSpotlightContent(
     onToggleWatchlist: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
     playButtonFocusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null,
-    onNavigateDown: (() -> Unit)? = null,
+    onNavigateUp: (() -> Boolean)? = null,
+    onNavigateDown: (() -> Boolean)? = null,
     onPlayFocused: (() -> Unit)? = null
 ) {
     if (item == null) return
@@ -307,18 +307,12 @@ private fun HeroMinimalButton(
     text: String,
     isPrimary: Boolean,
     focusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null,
-    onNavigateDown: (() -> Unit)? = null,
+    onNavigateUp: (() -> Boolean)? = null,
+    onNavigateDown: (() -> Boolean)? = null,
     onFocused: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
-
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1f,
-        animationSpec = tween(120),
-        label = "heroBtnScale"
-    )
 
     val (bgColor, textColor) = when {
         isFocused -> Pair(Color.White, Color.Black)
@@ -330,8 +324,9 @@ private fun HeroMinimalButton(
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .graphicsLayer {
-                this.scaleX = scale
-                this.scaleY = scale
+                val s = if (isFocused) 1.05f else 1f
+                this.scaleX = s
+                this.scaleY = s
             }
             .clip(RoundedCornerShape(50))
             .background(bgColor)
@@ -344,18 +339,8 @@ private fun HeroMinimalButton(
             .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                     when (event.nativeKeyEvent.keyCode) {
-                        KeyEvent.KEYCODE_DPAD_UP -> {
-                            if (onNavigateUp != null) {
-                                onNavigateUp.invoke()
-                                true
-                            } else false
-                        }
-                        KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            if (onNavigateDown != null) {
-                                onNavigateDown.invoke()
-                                true
-                            } else false
-                        }
+                        KeyEvent.KEYCODE_DPAD_UP -> onNavigateUp?.invoke() ?: false
+                        KeyEvent.KEYCODE_DPAD_DOWN -> onNavigateDown?.invoke() ?: false
                         else -> false
                     }
                 } else false

@@ -1,6 +1,5 @@
 package dev.dylanakp.abysstvlauncher.ui.components
 
-import android.view.KeyEvent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -35,8 +34,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.res.stringResource
+import dev.dylanakp.abysstvlauncher.ui.focus.dpadNavigation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -71,15 +70,17 @@ fun AbyssTopBar(
     weatherText: String? = null,
     isSearchActive: Boolean = false,
     activeTabRequester: FocusRequester? = null,
-    onNavigateDown: (() -> Unit)? = null
+    onNavigateDown: (() -> Boolean)? = null
 ) {
-    var currentTime by remember { mutableStateOf(formatTime()) }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            currentTime = formatTime()
-            delay(15_000L)
+    var pendingFocusTab by remember { mutableStateOf<AbyssNavTab?>(null) }
+    val visualActiveTab = pendingFocusTab ?: selectedTab
+    LaunchedEffect(pendingFocusTab) {
+        val target = pendingFocusTab ?: return@LaunchedEffect
+        delay(90L)
+        if (!isSearchActive && selectedTab != target) {
+            onSelectTab(target)
         }
+        pendingFocusTab = null
     }
 
     Box(
@@ -108,7 +109,11 @@ fun AbyssTopBar(
                     isSelected = isSearchActive,
                     focusRequester = if (isSearchActive) activeTabRequester else null,
                     onNavigateDown = onNavigateDown,
-                    onClick = onOpenSearch
+                    onFocused = { pendingFocusTab = null },
+                    onClick = {
+                        pendingFocusTab = null
+                        onOpenSearch()
+                    }
                 )
 
                 // Tabs
@@ -119,13 +124,25 @@ fun AbyssTopBar(
                     add(AbyssNavTab.APPS to stringResource(R.string.nav_apps))
                 }
                 tabs.forEach { (tab, label) ->
-                    val isSelected = !isSearchActive && selectedTab == tab
+                    val isSelected = !isSearchActive && visualActiveTab == tab
                     AbyssNavPillItem(
                         label = label,
                         isSelected = isSelected,
                         focusRequester = if (!isSearchActive && selectedTab == tab) activeTabRequester else null,
-                        onNavigateDown = onNavigateDown,
-                        onClick = { onSelectTab(tab) }
+                        onNavigateDown = {
+                            if (pendingFocusTab != null && pendingFocusTab != selectedTab) {
+                                onSelectTab(pendingFocusTab!!)
+                            }
+                            pendingFocusTab = null
+                            onNavigateDown?.invoke() ?: false
+                        },
+                        onFocused = {
+                            pendingFocusTab = if (selectedTab != tab) tab else null
+                        },
+                        onClick = {
+                            pendingFocusTab = null
+                            onSelectTab(tab)
+                        }
                     )
                 }
             }
@@ -142,15 +159,26 @@ fun AbyssTopBar(
             ) {
                 // Discover Compass Icon near Settings (if Seer is configured)
                 if (isSeerConfigured) {
-                    val isDiscoverSelected = !isSearchActive && selectedTab == AbyssNavTab.DISCOVER
+                    val isDiscoverSelected = !isSearchActive && visualActiveTab == AbyssNavTab.DISCOVER
                     TopBarVectorActionPill(
                         icon = CompassExploreIcon,
                         contentDescription = stringResource(R.string.nav_discover),
                         isSelected = isDiscoverSelected,
-                        autoSelectOnFocus = true,
-                        focusRequester = if (isDiscoverSelected) activeTabRequester else null,
-                        onNavigateDown = onNavigateDown,
-                        onClick = { onSelectTab(AbyssNavTab.DISCOVER) }
+                        focusRequester = if (!isSearchActive && selectedTab == AbyssNavTab.DISCOVER) activeTabRequester else null,
+                        onNavigateDown = {
+                            if (pendingFocusTab != null && pendingFocusTab != selectedTab) {
+                                onSelectTab(pendingFocusTab!!)
+                            }
+                            pendingFocusTab = null
+                            onNavigateDown?.invoke() ?: false
+                        },
+                        onFocused = {
+                            pendingFocusTab = if (selectedTab != AbyssNavTab.DISCOVER) AbyssNavTab.DISCOVER else null
+                        },
+                        onClick = {
+                            pendingFocusTab = null
+                            onSelectTab(AbyssNavTab.DISCOVER)
+                        }
                     )
                 }
 
@@ -161,6 +189,7 @@ fun AbyssTopBar(
                         contentDescription = stringResource(R.string.find_remote),
                         isSelected = false,
                         onNavigateDown = onNavigateDown,
+                        onFocused = { pendingFocusTab = null },
                         onClick = onFindRemote
                     )
                 }
@@ -171,6 +200,7 @@ fun AbyssTopBar(
                     contentDescription = stringResource(R.string.settings_header_title),
                     isSelected = false,
                     onNavigateDown = onNavigateDown,
+                    onFocused = { pendingFocusTab = null },
                     onClick = onOpenLauncherSettings
                 )
             }
@@ -231,15 +261,7 @@ fun AbyssTopBar(
                 )
             }
 
-            Text(
-                text = currentTime,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.5.sp,
-                    fontSize = 13.sp
-                ),
-                color = Color.White
-            )
+            TopBarClock()
         }
     }
 }
@@ -249,16 +271,11 @@ fun AbyssTopBar(
 private fun TopBarSearchIconPill(
     isSelected: Boolean,
     focusRequester: FocusRequester? = null,
-    onNavigateDown: (() -> Unit)? = null,
+    onNavigateDown: (() -> Boolean)? = null,
+    onFocused: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
-
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1f,
-        animationSpec = tween(120),
-        label = "searchPillScale"
-    )
 
     val bgColor = when {
         isFocused -> Color.White
@@ -275,27 +292,19 @@ private fun TopBarSearchIconPill(
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = if (isFocused) 1.05f else 1f
+                scaleX = s
+                scaleY = s
             }
             .clip(RoundedCornerShape(50))
             .background(bgColor)
-            .onFocusChanged { isFocused = it.isFocused }
-            .onPreviewKeyEvent { event ->
-                val native = event.nativeKeyEvent
-                val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                        native.keyCode == KeyEvent.KEYCODE_ENTER ||
-                        native.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
-                if (isSelectKey && native.action == KeyEvent.ACTION_UP) {
-                    onClick()
-                    true
-                } else if (native.action == KeyEvent.ACTION_DOWN && native.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                    onNavigateDown?.invoke()
-                    true
-                } else {
-                    false
+            .onFocusChanged {
+                isFocused = it.isFocused
+                if (it.isFocused) {
+                    onFocused?.invoke()
                 }
             }
+            .dpadNavigation(onDown = onNavigateDown)
             .combinedClickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center
@@ -315,17 +324,12 @@ private fun TopBarVectorActionPill(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String,
     isSelected: Boolean = false,
-    autoSelectOnFocus: Boolean = false,
     focusRequester: FocusRequester? = null,
-    onNavigateDown: (() -> Unit)? = null,
+    onNavigateDown: (() -> Boolean)? = null,
+    onFocused: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.06f else 1f,
-        animationSpec = tween(120),
-        label = "actionPillScale"
-    )
 
     val bgColor = when {
         isFocused -> Color.White
@@ -342,28 +346,20 @@ private fun TopBarVectorActionPill(
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = if (isFocused) 1.06f else 1f
+                scaleX = s
+                scaleY = s
             }
             .size(34.dp)
             .clip(CircleShape)
             .background(bgColor)
             .onFocusChanged {
                 isFocused = it.isFocused
-                if (it.isFocused && !isSelected && autoSelectOnFocus) {
-                    onClick()
+                if (it.isFocused) {
+                    onFocused?.invoke()
                 }
             }
-            .onPreviewKeyEvent { event ->
-                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
-                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_DOWN
-                ) {
-                    onNavigateDown?.invoke()
-                    true
-                } else {
-                    false
-                }
-            }
+            .dpadNavigation(onDown = onNavigateDown)
             .combinedClickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -382,16 +378,11 @@ private fun AbyssNavPillItem(
     label: String,
     isSelected: Boolean,
     focusRequester: FocusRequester? = null,
-    onNavigateDown: (() -> Unit)? = null,
+    onNavigateDown: (() -> Boolean)? = null,
+    onFocused: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
-
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.04f else 1f,
-        animationSpec = tween(120),
-        label = "navPillScale"
-    )
 
     val bgColor = when {
         isFocused -> Color.White
@@ -408,30 +399,22 @@ private fun AbyssNavPillItem(
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = if (isFocused) 1.04f else 1f
+                scaleX = s
+                scaleY = s
             }
             .clip(RoundedCornerShape(50))
             .background(bgColor)
             .onFocusChanged {
                 isFocused = it.isFocused
-                if (it.isFocused && !isSelected) {
-                    onClick()
+                if (it.isFocused) {
+                    onFocused?.invoke()
                 }
             }
-            .onPreviewKeyEvent { event ->
-                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
-                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_DOWN
-                ) {
-                    onNavigateDown?.invoke()
-                    true
-                } else {
-                    false
-                }
-            }
+            .dpadNavigation(onDown = onNavigateDown)
             .combinedClickable(onClick = onClick)
             .padding(
-                horizontal = if (isSelected || isFocused) 16.dp else 14.dp,
+                horizontal = 15.dp,
                 vertical = 7.dp
             ),
         contentAlignment = Alignment.Center
@@ -459,15 +442,11 @@ private fun TopBarActionPill(
     icon: AbyssIconType,
     contentDescription: String,
     isSelected: Boolean = false,
-    onNavigateDown: (() -> Unit)? = null,
+    onNavigateDown: (() -> Boolean)? = null,
+    onFocused: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.06f else 1f,
-        animationSpec = tween(120),
-        label = "actionPillScale"
-    )
 
     val bgColor = when {
         isFocused -> Color.White
@@ -483,23 +462,20 @@ private fun TopBarActionPill(
     Box(
         modifier = Modifier
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = if (isFocused) 1.06f else 1f
+                scaleX = s
+                scaleY = s
             }
             .size(34.dp)
             .clip(CircleShape)
             .background(bgColor)
-            .onFocusChanged { isFocused = it.isFocused }
-            .onPreviewKeyEvent { event ->
-                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
-                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_DOWN
-                ) {
-                    onNavigateDown?.invoke()
-                    true
-                } else {
-                    false
+            .onFocusChanged {
+                isFocused = it.isFocused
+                if (it.isFocused) {
+                    onFocused?.invoke()
                 }
             }
+            .dpadNavigation(onDown = onNavigateDown)
             .combinedClickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -511,7 +487,33 @@ private fun TopBarActionPill(
     }
 }
 
-private fun formatTime(): String {
-    val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
-    return sdf.format(Date())
+@Composable
+private fun TopBarClock() {
+    var currentTime by remember { mutableStateOf(formatTime()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            currentTime = formatTime()
+            val delayMs = 60_000L - (System.currentTimeMillis() % 60_000L)
+            delay(delayMs.coerceAtLeast(1_000L))
+        }
+    }
+
+    Text(
+        text = currentTime,
+        style = MaterialTheme.typography.titleMedium.copy(
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.5.sp,
+            fontSize = 13.sp
+        ),
+        color = Color.White
+    )
 }
+
+private val TOP_BAR_TIME_FORMATTER: java.time.format.DateTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+
+private fun formatTime(): String =
+    java.time.Instant.ofEpochMilli(System.currentTimeMillis())
+        .atZone(java.time.ZoneId.systemDefault())
+        .format(TOP_BAR_TIME_FORMATTER)

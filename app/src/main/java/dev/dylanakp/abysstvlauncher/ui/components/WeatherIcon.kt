@@ -1,9 +1,10 @@
 package dev.dylanakp.abysstvlauncher.ui.components
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -25,28 +26,34 @@ fun WeatherIcon(
     size: Dp = 15.dp,
     modifier: Modifier = Modifier
 ) {
-    Canvas(modifier = modifier.size(size)) {
-        val w = this.size.width
-        val h = this.size.height
-        val strokeWidth = (w * 0.10f).coerceAtLeast(1.5f)
-        val stroke = Stroke(
-            width = strokeWidth,
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round
-        )
-
-        when (type) {
-            WeatherIconType.SUNNY -> drawSunny(w, h, color, strokeWidth)
-            WeatherIconType.CLEAR_NIGHT -> drawClearNight(w, h, color)
-            WeatherIconType.PARTLY_CLOUDY_DAY -> drawPartlyCloudyDay(w, h, color, stroke, strokeWidth)
-            WeatherIconType.PARTLY_CLOUDY_NIGHT -> drawPartlyCloudyNight(w, h, color, stroke)
-            WeatherIconType.CLOUDY -> drawCloud(w, h, color, stroke)
-            WeatherIconType.FOG -> drawFog(w, h, color, strokeWidth)
-            WeatherIconType.RAIN -> drawRain(w, h, color, stroke, strokeWidth)
-            WeatherIconType.SNOW -> drawSnow(w, h, color, stroke, strokeWidth)
-            WeatherIconType.THUNDERSTORM -> drawThunderstorm(w, h, color, stroke, strokeWidth)
-        }
-    }
+    Box(
+        modifier = modifier
+            .size(size)
+            .drawWithCache {
+                val w = this.size.width
+                val h = this.size.height
+                val strokeWidth = (w * 0.10f).coerceAtLeast(1.5f)
+                val stroke = Stroke(
+                    width = strokeWidth,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round
+                )
+                val path = Path()
+                onDrawBehind {
+                    when (type) {
+                        WeatherIconType.SUNNY -> drawSunny(w, h, color, strokeWidth)
+                        WeatherIconType.CLEAR_NIGHT -> drawClearNight(w, h, color, path)
+                        WeatherIconType.PARTLY_CLOUDY_DAY -> drawPartlyCloudyDay(w, h, color, stroke, strokeWidth, path)
+                        WeatherIconType.PARTLY_CLOUDY_NIGHT -> drawPartlyCloudyNight(w, h, color, stroke, path)
+                        WeatherIconType.CLOUDY -> drawCloud(w, h, color, stroke, path)
+                        WeatherIconType.FOG -> drawFog(w, h, color, strokeWidth)
+                        WeatherIconType.RAIN -> drawRain(w, h, color, stroke, strokeWidth, path)
+                        WeatherIconType.SNOW -> drawSnow(w, h, color, stroke, strokeWidth, path)
+                        WeatherIconType.THUNDERSTORM -> drawThunderstorm(w, h, color, stroke, strokeWidth, path)
+                    }
+                }
+            }
+    )
 }
 
 private fun DrawScope.drawSunny(w: Float, h: Float, color: Color, strokeWidth: Float) {
@@ -65,8 +72,9 @@ private fun DrawScope.drawSunny(w: Float, h: Float, color: Color, strokeWidth: F
     }
 }
 
-private fun DrawScope.drawClearNight(w: Float, h: Float, color: Color) {
-    val path = Path().apply {
+private fun DrawScope.drawClearNight(w: Float, h: Float, color: Color, path: Path) {
+    path.rewind()
+    path.apply {
         moveTo(w * 0.66f, h * 0.14f)
         cubicTo(w * 0.18f, h * 0.22f, w * 0.18f, h * 0.78f, w * 0.66f, h * 0.86f)
         cubicTo(w * 0.36f, h * 0.72f, w * 0.36f, h * 0.28f, w * 0.66f, h * 0.14f)
@@ -80,12 +88,14 @@ private fun DrawScope.drawCloud(
     h: Float,
     color: Color,
     stroke: Stroke,
+    path: Path,
     offsetY: Float = 0f,
     scale: Float = 1f
 ) {
     val cx = w * 0.5f
     val cy = h * 0.5f + offsetY
-    val path = Path().apply {
+    path.rewind()
+    path.apply {
         moveTo(cx - w * 0.24f * scale, cy + h * 0.18f * scale)
         lineTo(cx + w * 0.24f * scale, cy + h * 0.18f * scale)
         cubicTo(
@@ -113,7 +123,8 @@ private fun DrawScope.drawPartlyCloudyDay(
     h: Float,
     color: Color,
     stroke: Stroke,
-    strokeWidth: Float
+    strokeWidth: Float,
+    path: Path
 ) {
     val sunCenter = Offset(w * 0.34f, h * 0.32f)
     drawCircle(color = color, radius = w * 0.15f, center = sunCenter, style = Stroke(strokeWidth))
@@ -126,23 +137,25 @@ private fun DrawScope.drawPartlyCloudyDay(
         val y2 = sunCenter.y + sin(rad).toFloat() * h * 0.29f
         drawLine(color = color, start = Offset(x1, y1), end = Offset(x2, y2), strokeWidth = strokeWidth, cap = StrokeCap.Round)
     }
-    drawCloud(w, h, color, stroke, offsetY = h * 0.08f, scale = 0.85f)
+    drawCloud(w, h, color, stroke, path, offsetY = h * 0.08f, scale = 0.85f)
 }
 
 private fun DrawScope.drawPartlyCloudyNight(
     w: Float,
     h: Float,
     color: Color,
-    stroke: Stroke
+    stroke: Stroke,
+    path: Path
 ) {
-    val moonPath = Path().apply {
+    path.rewind()
+    val moonPath = path.apply {
         moveTo(w * 0.46f, h * 0.14f)
         cubicTo(w * 0.14f, h * 0.18f, w * 0.14f, h * 0.52f, w * 0.44f, h * 0.56f)
         cubicTo(w * 0.26f, h * 0.48f, w * 0.26f, h * 0.22f, w * 0.46f, h * 0.14f)
         close()
     }
     drawPath(path = moonPath, color = color, style = Fill)
-    drawCloud(w, h, color, stroke, offsetY = h * 0.08f, scale = 0.85f)
+    drawCloud(w, h, color, stroke, path, offsetY = h * 0.08f, scale = 0.85f)
 }
 
 private fun DrawScope.drawFog(w: Float, h: Float, color: Color, strokeWidth: Float) {
@@ -156,9 +169,10 @@ private fun DrawScope.drawRain(
     h: Float,
     color: Color,
     stroke: Stroke,
-    strokeWidth: Float
+    strokeWidth: Float,
+    path: Path
 ) {
-    drawCloud(w, h, color, stroke, offsetY = -h * 0.10f, scale = 0.82f)
+    drawCloud(w, h, color, stroke, path, offsetY = -h * 0.10f, scale = 0.82f)
     val rainWidth = strokeWidth * 0.85f
     drawLine(color = color, start = Offset(w * 0.35f, h * 0.68f), end = Offset(w * 0.29f, h * 0.86f), strokeWidth = rainWidth, cap = StrokeCap.Round)
     drawLine(color = color, start = Offset(w * 0.51f, h * 0.68f), end = Offset(w * 0.45f, h * 0.86f), strokeWidth = rainWidth, cap = StrokeCap.Round)
@@ -170,9 +184,10 @@ private fun DrawScope.drawSnow(
     h: Float,
     color: Color,
     stroke: Stroke,
-    strokeWidth: Float
+    strokeWidth: Float,
+    path: Path
 ) {
-    drawCloud(w, h, color, stroke, offsetY = -h * 0.10f, scale = 0.82f)
+    drawCloud(w, h, color, stroke, path, offsetY = -h * 0.10f, scale = 0.82f)
     val dotRadius = strokeWidth * 0.75f
     drawCircle(color = color, radius = dotRadius, center = Offset(w * 0.34f, h * 0.78f), style = Fill)
     drawCircle(color = color, radius = dotRadius, center = Offset(w * 0.51f, h * 0.84f), style = Fill)
@@ -184,10 +199,12 @@ private fun DrawScope.drawThunderstorm(
     h: Float,
     color: Color,
     stroke: Stroke,
-    strokeWidth: Float
+    strokeWidth: Float,
+    path: Path
 ) {
-    drawCloud(w, h, color, stroke, offsetY = -h * 0.12f, scale = 0.82f)
-    val lightning = Path().apply {
+    drawCloud(w, h, color, stroke, path, offsetY = -h * 0.12f, scale = 0.82f)
+    path.rewind()
+    val lightning = path.apply {
         moveTo(w * 0.53f, h * 0.58f)
         lineTo(w * 0.42f, h * 0.74f)
         lineTo(w * 0.54f, h * 0.74f)

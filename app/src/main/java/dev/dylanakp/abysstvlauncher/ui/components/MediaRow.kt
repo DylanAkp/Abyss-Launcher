@@ -14,6 +14,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,12 +47,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import dev.dylanakp.abysstvlauncher.R
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -98,7 +99,7 @@ fun MediaRow(
     onItemFocused: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
     firstItemFocusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null,
+    onNavigateUp: (() -> Boolean)? = null,
     onSeeMoreClick: (() -> Unit)? = null,
     onItemLongClick: ((MediaItem) -> Unit)? = null,
     rowState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState()
@@ -131,11 +132,9 @@ fun MediaRow(
                     color = AbyssTextSecondary,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
-                        .focusProperties { canFocus = false }
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onSeeMoreClick() }
+                        .pointerInput(onSeeMoreClick) {
+                            detectTapGestures { onSeeMoreClick() }
+                        }
                         .padding(horizontal = 4.dp, vertical = 2.dp)
                 )
             }
@@ -155,11 +154,11 @@ fun MediaRow(
                     key = { _, it -> it.id },
                     contentType = { _, _ -> "media_poster" }
                 ) { index, item ->
-                    val clickLambda = remember(item.id) { { onItemClick(item) } }
-                    val longClickLambda = remember(item.id) {
+                    val clickLambda = remember(item, onItemClick) { { onItemClick(item) } }
+                    val longClickLambda = remember(item, onItemLongClick) {
                         if (onItemLongClick != null) { { onItemLongClick(item) } } else null
                     }
-                    val focusLambda = remember(item.id) { { onItemFocused(item) } }
+                    val focusLambda = remember(item, onItemFocused) { { onItemFocused(item) } }
 
                     MediaPosterCard(
                         item = item,
@@ -193,17 +192,11 @@ fun MediaPosterCard(
     onFocus: () -> Unit,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null,
+    onNavigateUp: (() -> Boolean)? = null,
     onLongClick: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var longPressConsumed by remember { mutableStateOf(false) }
-
-    val cardScale = animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1.0f,
-        animationSpec = tween(durationMillis = 50, easing = FastOutSlowInEasing),
-        label = "posterScale"
-    )
 
     val cardShape = remember { RoundedCornerShape(10.dp) }
     val badgeShape = remember { RoundedCornerShape(3.dp) }
@@ -229,12 +222,7 @@ fun MediaPosterCard(
 
                 when {
                     native.action == KeyEvent.ACTION_DOWN && native.keyCode == KeyEvent.KEYCODE_DPAD_UP -> {
-                        if (onNavigateUp != null) {
-                            onNavigateUp.invoke()
-                            true
-                        } else {
-                            false
-                        }
+                        onNavigateUp?.invoke() ?: false
                     }
                     isSelectKey && native.action == KeyEvent.ACTION_DOWN -> {
                         if (native.repeatCount == 0) {
@@ -273,16 +261,14 @@ fun MediaPosterCard(
                 .width(140.dp)
                 .height(200.dp)
                 .graphicsLayer {
-                    this.scaleX = cardScale.value
-                    this.scaleY = cardScale.value
+                    val s = if (isFocused) 1.05f else 1.0f
+                    this.scaleX = s
+                    this.scaleY = s
                     this.shape = cardShape
                     this.clip = true
                 }
                 .background(if (isFocused) Color(0x38FFFFFF) else AbyssSurfaceGlass)
-                .then(
-                    if (isFocused) Modifier.border(1.5.dp, Color.White, cardShape)
-                    else Modifier
-                )
+                .border(1.5.dp, if (isFocused) Color.White else Color.Transparent, cardShape)
         ) {
             val isProcessing = item.seerStatus == dev.dylanakp.abysstvlauncher.model.SeerMediaStatus.PROCESSING
             AbyssMediaArtwork(
@@ -411,7 +397,7 @@ fun LiveChannelRow(
     onChannelFocused: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
     firstItemFocusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null,
+    onNavigateUp: (() -> Boolean)? = null,
     onSeeMoreClick: (() -> Unit)? = null,
     rowState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState()
 ) {
@@ -443,11 +429,9 @@ fun LiveChannelRow(
                     color = AbyssTextSecondary,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
-                        .focusProperties { canFocus = false }
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onSeeMoreClick() }
+                        .pointerInput(onSeeMoreClick) {
+                            detectTapGestures { onSeeMoreClick() }
+                        }
                         .padding(horizontal = 4.dp, vertical = 2.dp)
                 )
             }
@@ -467,8 +451,8 @@ fun LiveChannelRow(
                     key = { _, it -> it.id },
                     contentType = { _, _ -> "live_channel" }
                 ) { index, item ->
-                    val clickLambda = remember(item.id) { { onChannelClick(item) } }
-                    val focusLambda = remember(item.id) { { onChannelFocused(item) } }
+                    val clickLambda = remember(item, onChannelClick) { { onChannelClick(item) } }
+                    val focusLambda = remember(item, onChannelFocused) { { onChannelFocused(item) } }
 
                     LiveChannelCard(
                         item = item,
@@ -500,15 +484,9 @@ fun LiveChannelCard(
     onFocus: () -> Unit,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null
+    onNavigateUp: (() -> Boolean)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
-
-    val cardScale = animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1.0f,
-        animationSpec = tween(durationMillis = 50, easing = FastOutSlowInEasing),
-        label = "liveScale"
-    )
 
     val channelShape = remember { RoundedCornerShape(10.dp) }
 
@@ -525,12 +503,7 @@ fun LiveChannelCard(
             .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
                     event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                    if (onNavigateUp != null) {
-                        onNavigateUp.invoke()
-                        true
-                    } else {
-                        false
-                    }
+                    onNavigateUp?.invoke() ?: false
                 } else {
                     false
                 }
@@ -548,16 +521,14 @@ fun LiveChannelCard(
                 .width(170.dp)
                 .height(98.dp)
                 .graphicsLayer {
-                    this.scaleX = cardScale.value
-                    this.scaleY = cardScale.value
+                    val s = if (isFocused) 1.05f else 1.0f
+                    this.scaleX = s
+                    this.scaleY = s
                     this.shape = channelShape
                     this.clip = true
                 }
                 .background(if (isFocused) Color.White else Color(0x60181B26))
-                .then(
-                    if (isFocused) Modifier.border(1.5.dp, Color.White, channelShape)
-                    else Modifier
-                )
+                .border(1.5.dp, if (isFocused) Color.White else Color.Transparent, channelShape)
                 .padding(8.dp)
         ) {
             Column(
@@ -586,7 +557,7 @@ fun LiveChannelCard(
                             .background(if (isFocused) Color.Black else Color.White)
                     )
                     Text(
-                        text = "DIRECT",
+                        text = stringResource(dev.dylanakp.abysstvlauncher.R.string.badge_direct),
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold
@@ -646,17 +617,12 @@ fun LiveChannelCard(
 fun SeeMoreCard(
     isChannel: Boolean = false,
     onClick: () -> Unit,
-    onNavigateUp: (() -> Unit)? = null,
+    onNavigateUp: (() -> Boolean)? = null,
     modifier: Modifier = Modifier
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
-    val cardScale = animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1.0f,
-        animationSpec = tween(durationMillis = 80, easing = FastOutSlowInEasing),
-        label = "seeMoreScale"
-    )
-
+    val cardShape = remember { RoundedCornerShape(10.dp) }
     val containerWidth = if (isChannel) 180.dp else 148.dp
     val containerHeight = if (isChannel) 108.dp else 240.dp
     val cardWidth = if (isChannel) 170.dp else 140.dp
@@ -671,10 +637,7 @@ fun SeeMoreCard(
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
                     event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP
                 ) {
-                    if (onNavigateUp != null) {
-                        onNavigateUp.invoke()
-                        true
-                    } else false
+                    onNavigateUp?.invoke() ?: false
                 } else false
             }
             .clickable(
@@ -688,15 +651,14 @@ fun SeeMoreCard(
                 .width(cardWidth)
                 .height(cardHeight)
                 .graphicsLayer {
-                    this.scaleX = cardScale.value
-                    this.scaleY = cardScale.value
+                    val s = if (isFocused) 1.05f else 1.0f
+                    this.scaleX = s
+                    this.scaleY = s
+                    this.shape = cardShape
+                    this.clip = true
                 }
-                .clip(RoundedCornerShape(10.dp))
                 .background(if (isFocused) Color.White else Color(0x331C2233))
-                .then(
-                    if (isFocused) Modifier.border(1.5.dp, Color.White, RoundedCornerShape(10.dp))
-                    else Modifier
-                )
+                .border(1.5.dp, if (isFocused) Color.White else Color.Transparent, cardShape)
                 .padding(12.dp),
             contentAlignment = Alignment.Center
         ) {

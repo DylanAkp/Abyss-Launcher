@@ -40,8 +40,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import dev.dylanakp.abysstvlauncher.ui.focus.dpadNavigation
+import dev.dylanakp.abysstvlauncher.ui.focus.safeRequestFocus
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -84,7 +87,7 @@ fun AbyssSearchScreen(
     onSelectSearchHistory: (String) -> Unit = {},
     onClearSearchHistory: () -> Unit = {},
     onRemoveSearchHistoryItem: (String) -> Unit = {},
-    onNavigateUpToTopBar: () -> Unit,
+    onNavigateUpToTopBar: () -> Boolean,
     onMediaClick: (MediaItem) -> Unit,
     onAppClick: (TvAppInfo) -> Unit,
     onAppLongClick: (TvAppInfo) -> Unit,
@@ -100,14 +103,24 @@ fun AbyssSearchScreen(
 
     val trimmedQuery = query.trim()
 
-    // Focus the search field and summon the integrated TV keyboard on entry
-    LaunchedEffect(Unit) {
-        delay(80L)
-        try {
-            searchInputFocusRequester.requestFocus()
-            keyboardController?.show()
-        } catch (_: Exception) {}
+    val moveFocusToResults: () -> Unit = {
+        keyboardController?.hide()
+        coroutineScope.launch {
+            if (trimmedQuery.isNotBlank()) {
+                searchResultsListState.scrollToItem(0, 0)
+            }
+            if (!firstResultFocusRequester.safeRequestFocus()) {
+                focusManager.moveFocus(FocusDirection.Down)
+            }
+        }
     }
+
+    // Focus the search field and summon the integrated TV keyboard on entry
+    RequestModalInitialFocus(
+        focusRequester = searchInputFocusRequester,
+        Unit,
+        onFocused = { keyboardController?.show() }
+    )
 
     LaunchedEffect(trimmedQuery, searchResults) {
         searchResultsListState.scrollToItem(0, 0)
@@ -215,91 +228,38 @@ fun AbyssSearchScreen(
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(
                             onSearch = {
-                                keyboardController?.hide()
                                 if (query.isNotBlank()) onSubmitQuery(query)
-                                coroutineScope.launch {
-                                    if (trimmedQuery.isNotBlank()) {
-                                        searchResultsListState.scrollToItem(0, 0)
-                                    }
-                                    val requested = try {
-                                        firstResultFocusRequester.requestFocus()
-                                        true
-                                    } catch (_: Exception) {
-                                        false
-                                    }
-                                    if (!requested) {
-                                        focusManager.moveFocus(FocusDirection.Down)
-                                    }
-                                }
+                                moveFocusToResults()
                             },
                             onDone = {
-                                keyboardController?.hide()
                                 if (query.isNotBlank()) onSubmitQuery(query)
-                                coroutineScope.launch {
-                                    if (trimmedQuery.isNotBlank()) {
-                                        searchResultsListState.scrollToItem(0, 0)
-                                    }
-                                    val requested = try {
-                                        firstResultFocusRequester.requestFocus()
-                                        true
-                                    } catch (_: Exception) {
-                                        false
-                                    }
-                                    if (!requested) {
-                                        focusManager.moveFocus(FocusDirection.Down)
-                                    }
-                                }
+                                moveFocusToResults()
                             }
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
                             .focusRequester(searchInputFocusRequester)
+                            .focusProperties {
+                                if (query.isNotEmpty()) {
+                                    right = clearButtonFocusRequester
+                                }
+                            }
                             .onFocusChanged {
                                 isInputFocused = it.isFocused
                                 if (it.isFocused) {
                                     keyboardController?.show()
                                 }
                             }
-                            .onPreviewKeyEvent { event ->
-                                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                    when (event.nativeKeyEvent.keyCode) {
-                                        KeyEvent.KEYCODE_DPAD_UP -> {
-                                            keyboardController?.hide()
-                                            onNavigateUpToTopBar()
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                            keyboardController?.hide()
-                                            coroutineScope.launch {
-                                                if (trimmedQuery.isNotBlank()) {
-                                                    searchResultsListState.scrollToItem(0, 0)
-                                                }
-                                                val requested = try {
-                                                    firstResultFocusRequester.requestFocus()
-                                                    true
-                                                } catch (_: Exception) {
-                                                    false
-                                                }
-                                                if (!requested) {
-                                                    focusManager.moveFocus(FocusDirection.Down)
-                                                }
-                                            }
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                            if (query.isNotEmpty()) {
-                                                try {
-                                                    clearButtonFocusRequester.requestFocus()
-                                                    true
-                                                } catch (_: Exception) {
-                                                    false
-                                                }
-                                            } else false
-                                        }
-                                        else -> false
-                                    }
-                                } else false
-                            },
+                            .dpadNavigation(
+                                onUp = {
+                                    keyboardController?.hide()
+                                    onNavigateUpToTopBar()
+                                },
+                                onDown = {
+                                    moveFocusToResults()
+                                    true
+                                }
+                            ),
                         decorationBox = { innerTextField ->
                             if (query.isEmpty()) {
                                 Text(
@@ -319,6 +279,9 @@ fun AbyssSearchScreen(
                 Box(
                     modifier = Modifier
                         .focusRequester(clearButtonFocusRequester)
+                        .focusProperties {
+                            left = searchInputFocusRequester
+                        }
                         .height(48.dp)
                         .clip(RoundedCornerShape(50))
                         .background(if (clearFocused) Color.White else AbyssPillGlass)
@@ -328,48 +291,18 @@ fun AbyssSearchScreen(
                             RoundedCornerShape(50)
                         )
                         .onFocusChanged { clearFocused = it.isFocused }
-                        .onPreviewKeyEvent { event ->
-                            if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                when (event.nativeKeyEvent.keyCode) {
-                                    KeyEvent.KEYCODE_DPAD_UP -> {
-                                        onNavigateUpToTopBar()
-                                        true
-                                    }
-                                    KeyEvent.KEYCODE_DPAD_LEFT -> {
-                                        try {
-                                            searchInputFocusRequester.requestFocus()
-                                            true
-                                        } catch (_: Exception) {
-                                            false
-                                        }
-                                    }
-                                    KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                        coroutineScope.launch {
-                                            if (trimmedQuery.isNotBlank()) {
-                                                searchResultsListState.scrollToItem(0, 0)
-                                            }
-                                            val requested = try {
-                                                firstResultFocusRequester.requestFocus()
-                                                true
-                                            } catch (_: Exception) {
-                                                false
-                                            }
-                                            if (!requested) {
-                                                focusManager.moveFocus(FocusDirection.Down)
-                                            }
-                                        }
-                                        true
-                                    }
-                                    else -> false
-                                }
-                            } else false
-                        }
+                        .dpadNavigation(
+                            onUp = { onNavigateUpToTopBar() },
+                            onDown = {
+                                moveFocusToResults()
+                                true
+                            }
+                        )
                         .clickable {
                             onQueryChange("")
-                            try {
-                                searchInputFocusRequester.requestFocus()
+                            if (searchInputFocusRequester.safeRequestFocus()) {
                                 keyboardController?.show()
-                            } catch (_: Exception) {}
+                            }
                         }
                         .padding(horizontal = 16.dp),
                     contentAlignment = Alignment.Center
@@ -400,12 +333,8 @@ fun AbyssSearchScreen(
 
         // Live Results Area
         Box(modifier = Modifier.fillMaxSize()) {
-            val navigateBackToSearchInput: () -> Unit = {
-                try {
-                    searchInputFocusRequester.requestFocus()
-                } catch (_: Exception) {
-                    onNavigateUpToTopBar()
-                }
+            val navigateBackToSearchInput: () -> Boolean = {
+                searchInputFocusRequester.safeRequestFocus() || onNavigateUpToTopBar()
             }
 
             if (trimmedQuery.isBlank()) {
@@ -449,25 +378,10 @@ fun AbyssSearchScreen(
                                                 RoundedCornerShape(6.dp)
                                             )
                                             .onFocusChanged { isClearFocused = it.isFocused }
-                                            .onPreviewKeyEvent { event ->
-                                                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                                    when (event.nativeKeyEvent.keyCode) {
-                                                        KeyEvent.KEYCODE_DPAD_UP -> {
-                                                            navigateBackToSearchInput()
-                                                            true
-                                                        }
-                                                        KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                                            try {
-                                                                firstResultFocusRequester.requestFocus()
-                                                                true
-                                                            } catch (_: Exception) {
-                                                                false
-                                                            }
-                                                        }
-                                                        else -> false
-                                                    }
-                                                } else false
-                                            }
+                                            .dpadNavigation(
+                                                onUp = navigateBackToSearchInput,
+                                                onDown = { firstResultFocusRequester.safeRequestFocus() }
+                                            )
                                             .clickable { onClearSearchHistory() }
                                             .padding(horizontal = 10.dp, vertical = 4.dp)
                                     ) {
@@ -486,7 +400,11 @@ fun AbyssSearchScreen(
                                     contentPadding = PaddingValues(horizontal = 32.dp),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    itemsIndexed(searchHistory, key = { _, h -> "hist_$h" }) { idx, h ->
+                                    itemsIndexed(
+                                        items = searchHistory,
+                                        key = { _, h -> "hist_$h" },
+                                        contentType = { _, _ -> "search_history" }
+                                    ) { idx, h ->
                                         RecentSearchPill(
                                             queryText = h,
                                             focusRequester = if (isTop && idx == 0) firstResultFocusRequester else null,
@@ -627,7 +545,11 @@ fun AbyssSearchScreen(
                                     contentPadding = PaddingValues(horizontal = 32.dp, vertical = 6.dp),
                                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                                 ) {
-                                    items(matchedApps.size, key = { matchedApps[it].packageName }) { idx ->
+                                    items(
+                                        count = matchedApps.size,
+                                        key = { matchedApps[it].packageName },
+                                        contentType = { "search_app" }
+                                    ) { idx ->
                                         val app = matchedApps[idx]
                                         AppCard(
                                             app = app,
@@ -652,7 +574,7 @@ fun AbyssSearchScreen(
 private fun RecentSearchPill(
     queryText: String,
     focusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null,
+    onNavigateUp: (() -> Boolean)? = null,
     onClick: () -> Unit,
     onRemove: () -> Unit
 ) {
@@ -669,19 +591,7 @@ private fun RecentSearchPill(
                 RoundedCornerShape(50)
             )
             .onFocusChanged { isFocused = it.isFocused }
-            .onPreviewKeyEvent { event ->
-                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                    when (event.nativeKeyEvent.keyCode) {
-                        KeyEvent.KEYCODE_DPAD_UP -> {
-                            if (onNavigateUp != null) {
-                                onNavigateUp.invoke()
-                                true
-                            } else false
-                        }
-                        else -> false
-                    }
-                } else false
-            }
+            .dpadNavigation(onUp = onNavigateUp)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onRemove

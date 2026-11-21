@@ -24,6 +24,7 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssVoid
 import kotlinx.coroutines.Dispatchers
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
+import org.koin.core.context.GlobalContext
 
 object AbyssImagePipeline {
     private var instance: ImageLoader? = null
@@ -31,8 +32,8 @@ object AbyssImagePipeline {
     fun getLoader(context: Context): ImageLoader {
         return instance ?: synchronized(this) {
             instance ?: run {
-                val okHttpClient = OkHttpClient.Builder()
-                    .dns(dev.dylanakp.abysstvlauncher.data.PreferIpv4Dns)
+                val baseClient = GlobalContext.getOrNull()?.get<OkHttpClient>()
+                val okHttpClient = (baseClient?.newBuilder() ?: OkHttpClient.Builder().dns(dev.dylanakp.abysstvlauncher.data.PreferIpv4Dns))
                     .dispatcher(Dispatcher().apply {
                         maxRequests = 16
                         maxRequestsPerHost = 6
@@ -55,7 +56,7 @@ object AbyssImagePipeline {
                     }
                     .interceptorDispatcher(Dispatchers.IO)
                     .transformationDispatcher(Dispatchers.IO)
-                    .decoderDispatcher(Dispatchers.IO.limitedParallelism(2))
+                    .decoderDispatcher(Dispatchers.IO.limitedParallelism(4))
                     .respectCacheHeaders(false)
                     .networkCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
@@ -89,17 +90,17 @@ fun AbyssMediaArtwork(
 
     val context = LocalContext.current
     val imageLoader = remember(context) { AbyssImagePipeline.getLoader(context) }
+    val memKey = remember(imageUrl, targetWidth, targetHeight) { "${imageUrl}#${targetWidth}x${targetHeight}" }
 
     // 1. Instant 0ms synchronous memory hit (Direct Hardware Bitmap rendering in frame 0)
-    val cachedBitmap = remember(imageUrl) {
-        if (imageUrl.isNotBlank()) {
-            imageLoader.memoryCache?.get(MemoryCache.Key(imageUrl))?.bitmap
-        } else null
-    }
+    val cachedBitmap = if (imageUrl.isNotBlank()) {
+        imageLoader.memoryCache?.get(MemoryCache.Key(memKey))?.bitmap
+    } else null
 
     if (cachedBitmap != null) {
+        val imageBitmap = remember(cachedBitmap) { cachedBitmap.asImageBitmap() }
         Image(
-            bitmap = cachedBitmap.asImageBitmap(),
+            bitmap = imageBitmap,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = modifier
@@ -108,10 +109,10 @@ fun AbyssMediaArtwork(
     }
 
     // 2. Not in RAM cache yet: AsyncImage handles disk/network fetch, caching into memoryCache, and rendering
-    val request = remember(imageUrl, isHeroBackdrop, targetWidth, targetHeight) {
+    val request = remember(imageUrl, memKey, targetWidth, targetHeight) {
         ImageRequest.Builder(context)
             .data(imageUrl)
-            .memoryCacheKey(imageUrl)
+            .memoryCacheKey(memKey)
             .diskCacheKey(imageUrl)
             .size(targetWidth, targetHeight)
             .precision(Precision.INEXACT)
