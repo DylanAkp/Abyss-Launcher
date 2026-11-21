@@ -25,8 +25,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,7 +65,11 @@ fun RemoteSectionContent() {
     val pairUrl = remember(localIp, currentPin) {
         "http://$localIp:${TvCommandController.DEFAULT_PORT}/?pair=$currentPin"
     }
-    val qrBitmap = remember(pairUrl) { generateQrBitmap(pairUrl, 360) }
+    val qrBitmap by produceState<Bitmap?>(initialValue = null, key1 = pairUrl) {
+        value = withContext(Dispatchers.Default) {
+            generateQrBitmap(pairUrl, 360)
+        }
+    }
 
     val scrollState = rememberScrollState()
 
@@ -95,7 +102,8 @@ fun RemoteSectionContent() {
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (qrBitmap != null) {
+                    val qrBmp = qrBitmap
+                    if (qrBmp != null) {
                         Box(
                             modifier = Modifier
                                 .size(164.dp)
@@ -105,7 +113,7 @@ fun RemoteSectionContent() {
                             contentAlignment = Alignment.Center
                         ) {
                             Image(
-                                bitmap = qrBitmap.asImageBitmap(),
+                                bitmap = qrBmp.asImageBitmap(),
                                 contentDescription = "QR Pair",
                                 modifier = Modifier.fillMaxSize()
                             )

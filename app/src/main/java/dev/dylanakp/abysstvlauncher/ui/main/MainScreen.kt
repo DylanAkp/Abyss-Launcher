@@ -28,8 +28,6 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.relocation.BringIntoViewResponder
-import androidx.compose.foundation.relocation.bringIntoViewResponder
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.MaterialTheme
@@ -41,12 +39,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -82,8 +83,10 @@ import dev.dylanakp.abysstvlauncher.ui.components.HeroSpotlightContent
 import dev.dylanakp.abysstvlauncher.ui.components.MediaDetailModal
 import dev.dylanakp.abysstvlauncher.ui.components.MediaRow
 import dev.dylanakp.abysstvlauncher.ui.components.MovieDetailScreen
+import dev.dylanakp.abysstvlauncher.ui.components.RequestModalInitialFocus
 import dev.dylanakp.abysstvlauncher.ui.components.SeriesDetailScreen
 import dev.dylanakp.abysstvlauncher.ui.components.SettingsDrawer
+import dev.dylanakp.abysstvlauncher.ui.focus.safeRequestFocus
 import dev.dylanakp.abysstvlauncher.ui.player.AbyssPlayerScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -152,8 +155,8 @@ fun MainScreen(
             onBack = { posMs, durMs ->
                 viewModel.closePlayer(posMs, durMs)
             },
-            onProgressUpdate = { posMs, durMs ->
-                viewModel.updatePlaybackProgress(posMs, durMs)
+            onProgressUpdate = { posMs, durMs, isPaused, updatedSession ->
+                viewModel.updatePlaybackProgress(posMs, durMs, isPaused, updatedSession)
             },
             onPlayNextEpisode = { nextEp ->
                 viewModel.playNextEpisodeInPlayer(nextEp)
@@ -235,12 +238,40 @@ fun MainScreen(
     val mainListState = rememberLazyListState()
     val appsGridState = rememberLazyGridState()
 
-    // Ensure initial focus targets Home Tab on launcher startup
+    val isAnyOverlayOpen = state.isSettingsDrawerOpen ||
+        state.pendingUpdate != null ||
+        state.selectedMediaForDetails != null ||
+        state.selectedAppForMenu != null ||
+        state.selectedMediaForMenu != null
+    val latestIsAnyOverlayOpen by rememberUpdatedState(isAnyOverlayOpen)
+    var wasSettingsDrawerOpen by remember { mutableStateOf(false) }
+    var hasDoneInitialBootFocus by remember { mutableStateOf(false) }
+
+    // Ensure initial focus targets Home Tab once on launcher startup
     LaunchedEffect(Unit) {
-        delay(150L)
-        try {
-            topBarFocusRequester.requestFocus()
-        } catch (_: Exception) {}
+        if (!hasDoneInitialBootFocus) {
+            hasDoneInitialBootFocus = true
+            repeat(6) { attempt ->
+                withFrameNanos { }
+                if (latestIsAnyOverlayOpen) return@LaunchedEffect
+                if (topBarFocusRequester.safeRequestFocus()) return@LaunchedEffect
+                delay(32L * (attempt + 1))
+            }
+        }
+    }
+
+    LaunchedEffect(state.isSettingsDrawerOpen) {
+        if (wasSettingsDrawerOpen && !state.isSettingsDrawerOpen && !latestIsAnyOverlayOpen) {
+            repeat(6) { attempt ->
+                withFrameNanos { }
+                if (topBarFocusRequester.safeRequestFocus()) {
+                    wasSettingsDrawerOpen = state.isSettingsDrawerOpen
+                    return@LaunchedEffect
+                }
+                delay(32L * (attempt + 1))
+            }
+        }
+        wasSettingsDrawerOpen = state.isSettingsDrawerOpen
     }
 
     LaunchedEffect(state.selectedTab) {
@@ -248,167 +279,50 @@ fun MainScreen(
         appsGridState.scrollToItem(0)
     }
 
-    val navigateToTopBar: () -> Unit = {
-        coroutineScope.launch {
-            try { topBarFocusRequester.requestFocus() } catch (_: Exception) {}
-        }
-        Unit
+    val navigateToTopBar: () -> Boolean = {
+        topBarFocusRequester.safeRequestFocus()
     }
 
-    val navigateToTopBarFromCatalog: () -> Unit = {
-        coroutineScope.launch {
-            if (mainListState.firstVisibleItemIndex > 0 || mainListState.firstVisibleItemScrollOffset > 0) {
-                mainListState.animateScrollToItem(0, 0)
-            } else {
-                try { topBarFocusRequester.requestFocus() } catch (_: Exception) {}
+    val isCatalogScrolled by remember {
+        derivedStateOf { mainListState.firstVisibleItemIndex > 0 || mainListState.firstVisibleItemScrollOffset > 0 }
+    }
+    val isAppsGridScrolled by remember {
+        derivedStateOf { appsGridState.firstVisibleItemIndex > 0 || appsGridState.firstVisibleItemScrollOffset > 0 }
+    }
+
+    val navigateToTopBarFromCatalog: () -> Boolean = {
+        if (isCatalogScrolled) {
+            coroutineScope.launch { mainListState.animateScrollToItem(0, 0) }
+        }
+        topBarFocusRequester.safeRequestFocus()
+    }
+
+    val onTopRowFocused: (MediaItem) -> Unit = handleNoOpFocus
+
+    val navigateToTopBarFromApps: () -> Boolean = {
+        if (isAppsGridScrolled) {
+            coroutineScope.launch { appsGridState.animateScrollToItem(0, 0) }
+        }
+        topBarFocusRequester.safeRequestFocus()
+    }
+
+    val onTopRowAppFocused: () -> Unit = {}
+
+    val onNavigateDownFromTopBar: () -> Boolean = {
+        when {
+            state.isSearchActive -> searchFirstKeyFocusRequester.safeRequestFocus()
+            state.selectedTab == AbyssNavTab.HOME && state.activeHeroItem != null -> {
+                heroPlayFocusRequester.safeRequestFocus() || contentFirstFocusRequester.safeRequestFocus()
             }
-        }
-        Unit
-    }
-
-    val onTopRowFocused: (MediaItem) -> Unit = {
-        coroutineScope.launch {
-            if (mainListState.firstVisibleItemIndex > 0 || mainListState.firstVisibleItemScrollOffset > 0) {
-                mainListState.animateScrollToItem(0, 0)
-            }
-        }
-    }
-
-    val navigateToTopBarFromApps: () -> Unit = {
-        coroutineScope.launch {
-            if (appsGridState.firstVisibleItemIndex > 0 || appsGridState.firstVisibleItemScrollOffset > 0) {
-                appsGridState.animateScrollToItem(0, 0)
-            } else {
-                try { topBarFocusRequester.requestFocus() } catch (_: Exception) {}
-            }
-        }
-        Unit
-    }
-
-    val onTopRowAppFocused: () -> Unit = {
-        coroutineScope.launch {
-            if (appsGridState.firstVisibleItemIndex > 0 || appsGridState.firstVisibleItemScrollOffset > 0) {
-                appsGridState.animateScrollToItem(0, 0)
-            }
-        }
-    }
-
-    val onNavigateDownFromTopBar: () -> Unit = {
-        coroutineScope.launch {
-            if (state.isSearchActive) {
-                try {
-                    searchFirstKeyFocusRequester.requestFocus()
-                } catch (_: Exception) {}
-            } else if (state.selectedTab == AbyssNavTab.HOME && state.activeHeroItem != null) {
-                try {
-                    heroPlayFocusRequester.requestFocus()
-                } catch (_: Exception) {
-                    try { contentFirstFocusRequester.requestFocus() } catch (_: Exception) {}
+            contentFirstFocusRequester.safeRequestFocus() -> true
+            else -> {
+                coroutineScope.launch {
+                    mainListState.scrollToItem(0)
+                    contentFirstFocusRequester.safeRequestFocus()
                 }
-            } else {
-                try {
-                    contentFirstFocusRequester.requestFocus()
-                } catch (_: Exception) {
-                    try {
-                        mainListState.scrollToItem(0)
-                        delay(50)
-                        contentFirstFocusRequester.requestFocus()
-                    } catch (_: Exception) {}
-                }
+                true
             }
         }
-        Unit
-    }
-
-    val continueWatchingFiltered = state.continueWatchingItems
-    val continueWatchingMoviesFiltered = state.continueWatchingMovies
-    val continueWatchingSeriesFiltered = state.continueWatchingSeries
-
-    val topHomeRowKey = remember(
-        state.pinnedApps.isNotEmpty(),
-        continueWatchingFiltered.isNotEmpty(),
-        state.seerConfig.isConfigured,
-        state.seerRequests.isNotEmpty(),
-        state.homeMovies.isNotEmpty(),
-        state.homeSeries.isNotEmpty(),
-        state.seerTrending.isNotEmpty()
-    ) {
-        when {
-            state.pinnedApps.isNotEmpty() -> "favoriteAppsRow"
-            continueWatchingFiltered.isNotEmpty() -> "continueWatchingRow"
-            state.seerConfig.isConfigured && state.seerRequests.isNotEmpty() -> "homeSeerRequestsRow"
-            state.homeMovies.isNotEmpty() -> "homeMoviesRow"
-            state.homeSeries.isNotEmpty() -> "homeSeriesRow"
-            state.seerConfig.isConfigured && state.seerTrending.isNotEmpty() -> "homeSeerTrendingRow"
-            else -> ""
-        }
-    }
-
-    val topDiscoverRowKey = remember(
-        state.seerRequests.isNotEmpty(),
-        state.seerTrending.isNotEmpty(),
-        state.seerPopularMovies.isNotEmpty(),
-        state.seerPopularTv.isNotEmpty()
-    ) {
-        when {
-            state.seerRequests.isNotEmpty() -> "seerRequestsRow"
-            state.seerTrending.isNotEmpty() -> "seerTrendingRow"
-            state.seerPopularMovies.isNotEmpty() -> "seerPopMoviesRow"
-            state.seerPopularTv.isNotEmpty() -> "seerPopTvRow"
-            else -> ""
-        }
-    }
-
-    val topMovieRowKey = remember(
-        continueWatchingMoviesFiltered.isNotEmpty(),
-        state.moviesTop100.isNotEmpty(),
-        state.moviesNouveautes.isNotEmpty(),
-        state.homeMovies.isNotEmpty()
-    ) {
-        when {
-            continueWatchingMoviesFiltered.isNotEmpty() -> "moviesContinueRow"
-            state.moviesTop100.isNotEmpty() -> "moviesTop100Row"
-            state.moviesNouveautes.isNotEmpty() -> "moviesNouveautesRow"
-            state.homeMovies.isNotEmpty() -> "moviesFullRow"
-            else -> ""
-        }
-    }
-
-    val topSeriesRowKey = remember(
-        continueWatchingSeriesFiltered.isNotEmpty(),
-        state.seriesTop100.isNotEmpty(),
-        state.seriesNouveautes.isNotEmpty(),
-        state.homeSeries.isNotEmpty()
-    ) {
-        when {
-            continueWatchingSeriesFiltered.isNotEmpty() -> "seriesContinueRow"
-            state.seriesTop100.isNotEmpty() -> "seriesTopRow"
-            state.seriesNouveautes.isNotEmpty() -> "seriesNouvRow"
-            state.homeSeries.isNotEmpty() -> "seriesFullRow"
-            else -> ""
-        }
-    }
-
-    val homeAppsRowState = rememberLazyListState()
-    val homeContinueRowState = rememberLazyListState()
-    val homeMoviesRowState = rememberLazyListState()
-    val homeSeriesRowState = rememberLazyListState()
-    val homeSeerRowState = rememberLazyListState()
-
-    val homeHeroOrTopBarNavigateUp: () -> Unit = {
-        coroutineScope.launch {
-            mainListState.animateScrollToItem(0, 0)
-            if (state.activeHeroItem != null) {
-                try {
-                    heroPlayFocusRequester.requestFocus()
-                } catch (_: Exception) {
-                    try { topBarFocusRequester.requestFocus() } catch (_: Exception) {}
-                }
-            } else {
-                try { topBarFocusRequester.requestFocus() } catch (_: Exception) {}
-            }
-        }
-        Unit
     }
 
     Box(
@@ -416,6 +330,17 @@ fun MainScreen(
             .fillMaxSize()
             .background(AbyssVoid)
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .focusProperties {
+                    onEnter = {
+                        if (isAnyOverlayOpen) {
+                            cancelFocusChange()
+                        }
+                    }
+                }
+        ) {
         if (state.isSearchActive) {
             AbyssSearchScreen(
                 query = state.searchQuery,
@@ -440,7 +365,7 @@ fun MainScreen(
                 onAppClick = { app ->
                     viewModel.addSearchHistory(state.searchQuery)
                     if (!SystemAppHelper.launchApp(context, app.packageName)) {
-                        Toast.makeText(context, "Cannot launch ${app.label}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(dev.dylanakp.abysstvlauncher.R.string.err_cannot_launch_app, app.label), Toast.LENGTH_SHORT).show()
                     }
                 },
                 onAppLongClick = { app ->
@@ -458,7 +383,7 @@ fun MainScreen(
                 onTopRowFocused = onTopRowAppFocused,
                 onAppClick = { app ->
                     if (!SystemAppHelper.launchApp(context, app.packageName)) {
-                        Toast.makeText(context, "Cannot launch ${app.label}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(dev.dylanakp.abysstvlauncher.R.string.err_cannot_launch_app, app.label), Toast.LENGTH_SHORT).show()
                     }
                 },
                 onAppLongClick = { app ->
@@ -466,402 +391,21 @@ fun MainScreen(
                 }
             )
         } else {
-            LazyColumn(
-                state = mainListState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 40.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // Header: Cinema Hero Banner on Home
-                if (state.selectedTab == AbyssNavTab.HOME) {
-                    item(key = "homeUnifiedHeader", contentType = "header") {
-                        val heroBringIntoViewResponder = remember {
-                            object : BringIntoViewResponder {
-                                @OptIn(ExperimentalFoundationApi::class)
-                                override fun calculateRectForParent(localRect: Rect): Rect {
-                                    return Rect(0f, 0f, localRect.right, 0f)
-                                }
-                                @OptIn(ExperimentalFoundationApi::class)
-                                override suspend fun bringChildIntoView(localRect: () -> Rect?) {
-                                    mainListState.animateScrollToItem(0, 0)
-                                }
-                            }
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(370.dp)
-                                .background(AbyssVoid)
-                                .bringIntoViewResponder(heroBringIntoViewResponder)
-                        ) {
-                            state.activeHeroItem?.let { activeHero ->
-                                HeroBackdropArtwork(
-                                    item = activeHero,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-
-                            state.activeHeroItem?.let { activeHero ->
-                                HeroSpotlightContent(
-                                    item = activeHero,
-                                    isInWatchlist = state.watchlistIds.contains(activeHero.id),
-                                    playButtonFocusRequester = heroPlayFocusRequester,
-                                    onNavigateUp = navigateToTopBar,
-                                    onNavigateDown = {
-                                        coroutineScope.launch {
-                                            try {
-                                                contentFirstFocusRequester.requestFocus()
-                                            } catch (_: Exception) {}
-                                        }
-                                    },
-                                    onPlayClick = { item -> playMediaItem(item) },
-                                    onPlayFocused = {
-                                        coroutineScope.launch {
-                                            mainListState.animateScrollToItem(0, 0)
-                                        }
-                                    },
-                                    onDetailsClick = { item -> playMediaItem(item) },
-                                    onToggleWatchlist = { item ->
-                                        viewModel.toggleWatchlist(item)
-                                    },
-                                    modifier = Modifier
-                                        .align(Alignment.BottomStart)
-                                        .padding(bottom = 12.dp)
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    item(key = "topBarSpacer", contentType = "spacer") {
-                        Spacer(modifier = Modifier.height(65.dp))
-                    }
-                }
-
-                when (state.selectedTab) {
-                    AbyssNavTab.HOME -> {
-                        // Favorite Pinned Apps Row
-                        if (state.pinnedApps.isNotEmpty()) {
-                            item(key = "favoriteAppsRow", contentType = "app_row") {
-                                val isTopRow = topHomeRowKey == "favoriteAppsRow"
-                                AppHorizontalRow(
-                                    title = stringResource(R.string.row_pinned_apps),
-                                    apps = state.pinnedApps,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) homeHeroOrTopBarNavigateUp else null,
-                                    rowState = homeAppsRowState,
-                                    onAppClick = { app ->
-                                        SystemAppHelper.launchApp(context, app.packageName)
-                                    },
-                                    onAppLongClick = { app ->
-                                        viewModel.openAppContextMenu(app)
-                                    }
-                                )
-                            }
-                        }
-
-                        // Continue Watching Row (Powered directly by Jellyfin Resume & Next Up)
-                        if (continueWatchingFiltered.isNotEmpty()) {
-                            item(key = "continueWatchingRow", contentType = "media_poster_row") {
-                                val isTopRow = topHomeRowKey == "continueWatchingRow"
-                                MediaRow(
-                                    title = stringResource(R.string.row_continue_watching),
-                                    items = continueWatchingFiltered,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) homeHeroOrTopBarNavigateUp else null,
-                                    rowState = homeContinueRowState,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus
-                                )
-                            }
-                        }
-
-                        // Seer Active Requests & Downloads Row (if any)
-                        if (state.seerConfig.isConfigured && state.seerRequests.isNotEmpty()) {
-                            item(key = "homeSeerRequestsRow", contentType = "media_poster_row") {
-                                val isTopRow = topHomeRowKey == "homeSeerRequestsRow"
-                                MediaRow(
-                                    title = stringResource(R.string.row_requests_downloads),
-                                    items = state.seerRequests,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) homeHeroOrTopBarNavigateUp else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus
-                                )
-                            }
-                        }
-
-                        // Jellyfin Movies Row
-                        if (state.homeMovies.isNotEmpty()) {
-                            item(key = "homeMoviesRow", contentType = "media_poster_row") {
-                                val isTopRow = topHomeRowKey == "homeMoviesRow"
-                                val seeAllMoviesTitle = stringResource(R.string.row_all_movies)
-                                MediaRow(
-                                    title = stringResource(R.string.row_recent_movies),
-                                    items = state.homeMovies,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) homeHeroOrTopBarNavigateUp else null,
-                                    rowState = homeMoviesRowState,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus,
-                                    onSeeMoreClick = { viewModel.openCatalog(seeAllMoviesTitle, state.movies) }
-                                )
-                            }
-                        }
-
-                        // Jellyfin Series Row
-                        if (state.homeSeries.isNotEmpty()) {
-                            item(key = "homeSeriesRow", contentType = "media_poster_row") {
-                                val isTopRow = topHomeRowKey == "homeSeriesRow"
-                                val seeAllSeriesTitle = stringResource(R.string.row_all_series)
-                                MediaRow(
-                                    title = stringResource(R.string.row_recent_shows),
-                                    items = state.homeSeries,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) homeHeroOrTopBarNavigateUp else null,
-                                    rowState = homeSeriesRowState,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus,
-                                    onSeeMoreClick = { viewModel.openCatalog(seeAllSeriesTitle, state.series) }
-                                )
-                            }
-                        }
-
-                        // Seer Trending / Discover Row
-                        if (state.seerConfig.isConfigured && state.seerTrending.isNotEmpty()) {
-                            item(key = "homeSeerTrendingRow", contentType = "media_poster_row") {
-                                val isTopRow = topHomeRowKey == "homeSeerTrendingRow"
-                                val title = stringResource(R.string.row_seer_trending)
-                                MediaRow(
-                                    title = title,
-                                    items = state.seerTrending,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) homeHeroOrTopBarNavigateUp else null,
-                                    rowState = homeSeerRowState,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = handleNoOpFocus,
-                                    onSeeMoreClick = { viewModel.openCatalog(title, state.seerTrending) }
-                                )
-                            }
-                        }
-                    }
-
-                    AbyssNavTab.DISCOVER -> {
-                        // Seer Requests Row
-                        if (state.seerRequests.isNotEmpty()) {
-                            item(key = "seerRequestsRow", contentType = "media_poster_row") {
-                                val isTopRow = topDiscoverRowKey == "seerRequestsRow"
-                                MediaRow(
-                                    title = stringResource(R.string.row_seer_requests),
-                                    items = state.seerRequests,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus
-                                )
-                            }
-                        }
-
-                        // Seer Trending Row
-                        if (state.seerTrending.isNotEmpty()) {
-                            item(key = "seerTrendingRow", contentType = "media_poster_row") {
-                                val isTopRow = topDiscoverRowKey == "seerTrendingRow"
-                                val title = stringResource(R.string.row_seer_trending)
-                                MediaRow(
-                                    title = title,
-                                    items = state.seerTrending,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
-                                    onSeeMoreClick = { viewModel.openFullCategory(title, "seer_trending") }
-                                )
-                            }
-                        }
-
-                        // Seer Popular Movies
-                        if (state.seerPopularMovies.isNotEmpty()) {
-                            item(key = "seerPopMoviesRow", contentType = "media_poster_row") {
-                                val isTopRow = topDiscoverRowKey == "seerPopMoviesRow"
-                                val title = stringResource(R.string.row_seer_popular_movies)
-                                MediaRow(
-                                    title = title,
-                                    items = state.seerPopularMovies,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
-                                    onSeeMoreClick = { viewModel.openFullCategory(title, "seer_movies") }
-                                )
-                            }
-                        }
-
-                        // Seer Popular TV Shows
-                        if (state.seerPopularTv.isNotEmpty()) {
-                            item(key = "seerPopTvRow", contentType = "media_poster_row") {
-                                val isTopRow = topDiscoverRowKey == "seerPopTvRow"
-                                val title = stringResource(R.string.row_seer_popular_tv)
-                                MediaRow(
-                                    title = title,
-                                    items = state.seerPopularTv,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
-                                    onSeeMoreClick = { viewModel.openFullCategory(title, "seer_tv") }
-                                )
-                            }
-                        }
-                    }
-
-                    AbyssNavTab.MOVIES -> {
-                        if (continueWatchingMoviesFiltered.isNotEmpty()) {
-                            item(key = "moviesContinueRow", contentType = "media_poster_row") {
-                                val isTopRow = topMovieRowKey == "moviesContinueRow"
-                                MediaRow(
-                                    title = stringResource(R.string.row_continue_watching),
-                                    items = continueWatchingMoviesFiltered,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus
-                                )
-                            }
-                        }
-
-                        if (state.moviesTop100.isNotEmpty()) {
-                            item(key = "moviesTop100Row", contentType = "media_poster_row") {
-                                val isTopRow = topMovieRowKey == "moviesTop100Row"
-                                val title = stringResource(R.string.row_top_rated_movies)
-                                MediaRow(
-                                    title = title,
-                                    items = state.moviesTop100,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
-                                    onSeeMoreClick = { viewModel.openFullCategory(title, "movies_top") }
-                                )
-                            }
-                        }
-
-                        if (state.moviesNouveautes.isNotEmpty()) {
-                            item(key = "moviesNouveautesRow", contentType = "media_poster_row") {
-                                val isTopRow = topMovieRowKey == "moviesNouveautesRow"
-                                val title = stringResource(R.string.row_recently_added_movies)
-                                MediaRow(
-                                    title = title,
-                                    items = state.moviesNouveautes,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
-                                    onSeeMoreClick = { viewModel.openFullCategory(title, "movies_nouv") }
-                                )
-                            }
-                        }
-
-                        if (state.movies.isNotEmpty()) {
-                            item(key = "moviesFullRow", contentType = "media_poster_row") {
-                                val isTopRow = topMovieRowKey == "moviesFullRow"
-                                val title = stringResource(R.string.row_all_jf_movies)
-                                MediaRow(
-                                    title = title,
-                                    items = state.movies.take(30),
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
-                                    onSeeMoreClick = { viewModel.openCatalog(title, state.movies) }
-                                )
-                            }
-                        }
-                    }
-
-                    AbyssNavTab.SERIES -> {
-                        if (continueWatchingSeriesFiltered.isNotEmpty()) {
-                            item(key = "seriesContinueRow", contentType = "media_poster_row") {
-                                val isTopRow = topSeriesRowKey == "seriesContinueRow"
-                                MediaRow(
-                                    title = stringResource(R.string.row_continue_watching),
-                                    items = continueWatchingSeriesFiltered,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus
-                                )
-                            }
-                        }
-
-                        if (state.seriesTop100.isNotEmpty()) {
-                            item(key = "seriesTopRow", contentType = "media_poster_row") {
-                                val isTopRow = topSeriesRowKey == "seriesTopRow"
-                                val title = stringResource(R.string.row_top_rated_shows)
-                                MediaRow(
-                                    title = title,
-                                    items = state.seriesTop100,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
-                                    onSeeMoreClick = { viewModel.openFullCategory(title, "series_top") }
-                                )
-                            }
-                        }
-
-                        if (state.seriesNouveautes.isNotEmpty()) {
-                            item(key = "seriesNouvRow", contentType = "media_poster_row") {
-                                val isTopRow = topSeriesRowKey == "seriesNouvRow"
-                                val title = stringResource(R.string.row_recently_added_shows)
-                                MediaRow(
-                                    title = title,
-                                    items = state.seriesNouveautes,
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
-                                    onSeeMoreClick = { viewModel.openFullCategory(title, "series_nouv") }
-                                )
-                            }
-                        }
-
-                        if (state.series.isNotEmpty()) {
-                            item(key = "seriesFullRow", contentType = "media_poster_row") {
-                                val isTopRow = topSeriesRowKey == "seriesFullRow"
-                                val title = stringResource(R.string.row_all_jf_series)
-                                MediaRow(
-                                    title = title,
-                                    items = state.series.take(30),
-                                    firstItemFocusRequester = if (isTopRow) contentFirstFocusRequester else null,
-                                    onNavigateUp = if (isTopRow) navigateToTopBarFromCatalog else null,
-                                    onItemClick = playMediaItem,
-                                    onItemLongClick = handleMediaContextMenu,
-                                    onItemFocused = if (isTopRow) onTopRowFocused else handleNoOpFocus,
-                                    onSeeMoreClick = { viewModel.openCatalog(title, state.series) }
-                                )
-                            }
-                        }
-                    }
-
-                    AbyssNavTab.APPS -> Unit
-                }
-            }
+            MainCatalogContent(
+                state = state,
+                viewModel = viewModel,
+                context = context,
+                mainListState = mainListState,
+                topBarFocusRequester = topBarFocusRequester,
+                heroPlayFocusRequester = heroPlayFocusRequester,
+                contentFirstFocusRequester = contentFirstFocusRequester,
+                navigateToTopBar = navigateToTopBar,
+                navigateToTopBarFromCatalog = navigateToTopBarFromCatalog,
+                onTopRowFocused = onTopRowFocused,
+                playMediaItem = playMediaItem,
+                handleMediaContextMenu = handleMediaContextMenu,
+                handleNoOpFocus = handleNoOpFocus
+            )
         }
 
         // Floating Top Bar with frosted button groups
@@ -881,16 +425,8 @@ fun MainScreen(
             onSelectTab = { viewModel.selectTab(it) },
             onFindRemote = if (isRemoteLocatorInstalled) {
                 {
-                    val launched = SystemAppHelper.launchApp(context, "com.nvidia.remotelocator")
-                    if (!launched) {
-                        try {
-                            val intent = context.packageManager.getLaunchIntentForPackage("com.nvidia.remotelocator")
-                            if (intent != null) {
-                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            }
-                        } catch (_: Exception) {}
-                    }
+                    SystemAppHelper.launchApp(context, "com.nvidia.remotelocator")
+                    Unit
                 }
             } else null,
             onOpenSearch = { viewModel.setSearchActive(true) },
@@ -931,192 +467,13 @@ fun MainScreen(
                 }
             }
         }
-
-        // App Context Menu for Pinned / Hidden apps
-        AppContextMenu(
-            app = state.selectedAppForMenu,
-            onDismiss = { viewModel.closeAppContextMenu() },
-            onLaunch = { app ->
-                SystemAppHelper.launchApp(context, app.packageName)
-                viewModel.closeAppContextMenu()
-            },
-            onTogglePin = { app ->
-                viewModel.togglePinApp(context, app)
-            },
-            onMoveLeft = { app ->
-                viewModel.movePinnedApp(context, app, -1)
-            },
-            onMoveRight = { app ->
-                viewModel.movePinnedApp(context, app, 1)
-            },
-            onToggleHide = { app ->
-                viewModel.toggleHideApp(context, app)
-            },
-            onOpenSystemInfo = { app ->
-                SystemAppHelper.openAppDetails(context, app.packageName)
-                viewModel.closeAppContextMenu()
-            }
-        )
-
-        // Media Context Menu for Movies / Series (Mark as watched, remove from continue, watchlist)
-        dev.dylanakp.abysstvlauncher.ui.components.MediaContextMenu(
-            media = state.selectedMediaForMenu,
-            isInWatchlist = state.selectedMediaForMenu?.let { state.watchlistIds.contains(it.id) } ?: false,
-            playbackHistory = state.playbackHistory,
-            onDismiss = { viewModel.closeMediaContextMenu() },
-            onPlay = { media ->
-                viewModel.closeMediaContextMenu()
-                playMediaItem(media)
-            },
-            onOpenDetails = { media ->
-                viewModel.closeMediaContextMenu()
-                playMediaItem(media)
-            },
-            onToggleWatchlist = { media ->
-                viewModel.toggleWatchlist(media)
-            },
-            onToggleWatched = { media ->
-                viewModel.toggleMediaWatchedStatus(media)
-            },
-            onRemoveFromContinue = { media ->
-                viewModel.removeFromContinueWatching(media)
-            }
-        )
-
-        // Media Detail Modal with Play and Seer Request support
-        MediaDetailModal(
-            item = state.selectedMediaForDetails,
-            isSeerConfigured = state.seerConfig.isConfigured,
-            onDismiss = { viewModel.closeMediaDetails() },
-            onPlay = { item ->
-                viewModel.closeMediaDetails()
-                playMediaItem(item)
-            },
-            onRequestOnSeer = { item ->
-                viewModel.requestMediaOnSeer(item)
-            }
-        )
-
-        // Settings Drawer
-        SettingsDrawer(
-            isOpen = state.isSettingsDrawerOpen,
-            jellyfinConfig = state.jellyfinConfig,
-            seerConfig = state.seerConfig,
-            isSyncing = state.isSyncingJellyfin,
-            currentLanguage = state.language,
-            showHiddenApps = state.showHiddenApps,
-            weatherCity = state.weatherCity,
-            temperatureUnit = state.temperatureUnit,
-            weatherInfo = state.weatherInfo,
-            onClose = { viewModel.setSettingsDrawerOpen(false) },
-            onOpenAndroidSettings = { SystemAppHelper.openAndroidSettings(context) },
-            onSaveAndConnectJellyfin = { srv, user, pass ->
-                viewModel.saveAndConnectJellyfin(srv, user, pass)
-            },
-            onSaveAndTestSeer = { srv, key ->
-                viewModel.saveAndTestSeer(srv, key)
-            },
-            onSelectPlayerPreference = { viewModel.setPlayerPreference(it) },
-            onSelectLanguage = { viewModel.setLanguage(it) },
-            onToggleShowHiddenApps = { viewModel.setShowHiddenApps(it) },
-            onUpdateWeatherCity = { viewModel.setWeatherCity(it) },
-            onSelectTemperatureUnit = { viewModel.setTemperatureUnit(it) },
-            isCheckingUpdates = state.isCheckingUpdates,
-            onCheckForUpdates = { viewModel.checkForUpdates(silent = false) }
-        )
-
-        // App Update Prompt Modal
-        AppUpdateModal(
-            update = state.pendingUpdate,
-            isDownloading = state.isDownloadingUpdate,
-            downloadProgress = state.updateDownloadProgress,
-            errorMessage = state.updateError,
-            onDismiss = { viewModel.dismissUpdate() },
-            onUpdate = { viewModel.downloadAndInstallUpdate(context) }
-        )
-    }
-}
-
-@Composable
-private fun AppHorizontalRow(
-    title: String,
-    apps: List<TvAppInfo>,
-    onAppClick: (TvAppInfo) -> Unit,
-    onAppLongClick: (TvAppInfo) -> Unit,
-    modifier: Modifier = Modifier,
-    firstItemFocusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null,
-    rowState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState()
-) {
-    Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 15.sp
-            ),
-            color = AbyssTextPrimary,
-            modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp)
-        )
-        LazyRow(
-            state = rowState,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(152.dp),
-            contentPadding = PaddingValues(horizontal = 32.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            itemsIndexed(apps, key = { _, it -> it.packageName }) { index, app ->
-                AppCard(
-                    app = app,
-                    focusRequester = if (index == 0) firstItemFocusRequester else null,
-                    onNavigateUp = onNavigateUp,
-                    onClick = { onAppClick(app) },
-                    onLongClick = { onAppLongClick(app) }
-                )
-            }
         }
-    }
-}
 
-@Composable
-private fun AppsGridView(
-    allApps: List<TvAppInfo>,
-    hiddenApps: List<TvAppInfo>,
-    showHiddenApps: Boolean,
-    gridState: LazyGridState,
-    onAppClick: (TvAppInfo) -> Unit,
-    onAppLongClick: (TvAppInfo) -> Unit,
-    firstItemFocusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null,
-    onTopRowFocused: (() -> Unit)? = null
-) {
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val totalAvailableWidth = maxWidth - 64.dp
-        val minCardWidth = 170.dp
-        val spacing = 14.dp
-        val columnsCount = maxOf(1, ((totalAvailableWidth + spacing) / (minCardWidth + spacing)).toInt())
-
-        LazyVerticalGrid(
-            state = gridState,
-            columns = GridCells.Adaptive(minSize = minCardWidth),
-            horizontalArrangement = Arrangement.spacedBy(spacing),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 72.dp, bottom = 40.dp),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            val list = if (showHiddenApps) (allApps + hiddenApps) else allApps
-            itemsIndexed(list, key = { _, it -> it.packageName }) { index, app ->
-                val isTopRow = index < columnsCount
-                AppCard(
-                    app = app,
-                    focusRequester = if (index == 0) firstItemFocusRequester else null,
-                    onNavigateUp = if (isTopRow) onNavigateUp else null,
-                    onFocus = if (isTopRow) onTopRowFocused else null,
-                    onClick = { onAppClick(app) },
-                    onLongClick = { onAppLongClick(app) }
-                )
-            }
-        }
+        MainOverlays(
+            state = state,
+            viewModel = viewModel,
+            context = context,
+            playMediaItem = playMediaItem
+        )
     }
 }

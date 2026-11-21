@@ -37,11 +37,11 @@ import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
 @Composable
 fun SeerSectionContent(
     config: SeerConfig,
+    isTesting: Boolean = false,
     onSaveAndTest: (String, String) -> Unit
 ) {
     var serverUrl by remember(config.serverUrl) { mutableStateOf(config.serverUrl) }
     var apiKey by remember(config.apiKey) { mutableStateOf(config.apiKey) }
-    var isTesting by remember { mutableStateOf(false) }
 
     val testButtonFocusRequester = remember { FocusRequester() }
     val scrollState = rememberScrollState()
@@ -81,9 +81,7 @@ fun SeerSectionContent(
                 isLoading = isTesting,
                 focusRequester = testButtonFocusRequester,
                 onClick = {
-                    isTesting = true
                     onSaveAndTest(serverUrl.trim(), apiKey.trim())
-                    isTesting = false
                 }
             )
         }
