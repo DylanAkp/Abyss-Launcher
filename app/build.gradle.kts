@@ -34,11 +34,6 @@ android {
         versionCode = vCode
         versionName = vName
 
-        buildConfigField("String", "DEFAULT_JELLYFIN_SERVER", "\"${escapeString(envProps["JELLYFIN_SERVER_URL"] ?: "")}\"")
-        buildConfigField("String", "DEFAULT_JELLYFIN_USER", "\"${escapeString(envProps["JELLYFIN_USERNAME"] ?: "")}\"")
-        buildConfigField("String", "DEFAULT_JELLYFIN_PASS", "\"${escapeString(envProps["JELLYFIN_PASSWORD"] ?: "")}\"")
-        buildConfigField("String", "DEFAULT_SEER_SERVER", "\"${escapeString(envProps["SEER_SERVER_URL"] ?: "")}\"")
-        buildConfigField("String", "DEFAULT_SEER_API_KEY", "\"${escapeString(envProps["SEER_API_KEY"] ?: "")}\"")
         buildConfigField("String", "TMDB_API_KEY", "\"${escapeString(envProps["TMDB_API_KEY"] ?: "")}\"")
     }
 
@@ -55,7 +50,19 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("String", "DEFAULT_JELLYFIN_SERVER", "\"${escapeString(envProps["JELLYFIN_SERVER_URL"] ?: "")}\"")
+            buildConfigField("String", "DEFAULT_JELLYFIN_USER", "\"${escapeString(envProps["JELLYFIN_USERNAME"] ?: "")}\"")
+            buildConfigField("String", "DEFAULT_JELLYFIN_PASS", "\"${escapeString(envProps["JELLYFIN_PASSWORD"] ?: "")}\"")
+            buildConfigField("String", "DEFAULT_SEER_SERVER", "\"${escapeString(envProps["SEER_SERVER_URL"] ?: "")}\"")
+            buildConfigField("String", "DEFAULT_SEER_API_KEY", "\"${escapeString(envProps["SEER_API_KEY"] ?: "")}\"")
+        }
         release {
+            buildConfigField("String", "DEFAULT_JELLYFIN_SERVER", "\"\"")
+            buildConfigField("String", "DEFAULT_JELLYFIN_USER", "\"\"")
+            buildConfigField("String", "DEFAULT_JELLYFIN_PASS", "\"\"")
+            buildConfigField("String", "DEFAULT_SEER_SERVER", "\"\"")
+            buildConfigField("String", "DEFAULT_SEER_API_KEY", "\"\"")
             isMinifyEnabled = true
             isShrinkResources = true
             val ksFile = rootProject.file("release.jks")
@@ -123,17 +130,13 @@ dependencies {
   androidTestImplementation(libs.androidx.test.runner)
   androidTestImplementation(libs.androidx.test.espresso.core)
 
-  // Navigation
-  implementation(libs.androidx.navigation3.ui)
-  implementation(libs.androidx.navigation3.runtime)
-  implementation(libs.androidx.lifecycle.viewmodel.navigation3)
-
   // AndroidX Media3 (ExoPlayer)
   implementation(libs.androidx.media3.exoplayer)
   implementation(libs.androidx.media3.exoplayer.hls)
   implementation(libs.androidx.media3.exoplayer.dash)
   implementation(libs.androidx.media3.ui)
   implementation(libs.androidx.media3.common)
+  implementation(libs.jellyfin.media3.ffmpeg)
 
   // Image Loading
   implementation(libs.coil.compose)

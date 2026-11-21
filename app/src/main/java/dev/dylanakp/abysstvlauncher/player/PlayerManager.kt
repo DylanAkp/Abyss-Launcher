@@ -27,6 +27,7 @@ import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import dev.dylanakp.abysstvlauncher.R
+import dev.dylanakp.abysstvlauncher.data.LauncherPreferences
 import dev.dylanakp.abysstvlauncher.ui.player.PlayerSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,12 +51,15 @@ data class TrackOption(
     val isOffOption: Boolean = false
 )
 
+data class PlayerPositionState(
+    val currentPositionMs: Long = 0L,
+    val bufferedPositionMs: Long = 0L
+)
+
 data class PlayerPlaybackState(
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
-    val currentPositionMs: Long = 0L,
     val durationMs: Long = 0L,
-    val bufferedPositionMs: Long = 0L,
     val audioTracks: List<TrackOption> = emptyList(),
     val subtitleTracks: List<TrackOption> = emptyList(),
     val videoResolutionBadge: String = "",
@@ -66,7 +70,10 @@ data class PlayerPlaybackState(
 interface PlayerManager {
     val player: ExoPlayer
     val state: StateFlow<PlayerPlaybackState>
+    val positionState: StateFlow<PlayerPositionState>
     val currentSession: StateFlow<PlayerSession?>
+
+    fun setPositionPollingEnabled(enabled: Boolean)
 
     fun prepare(context: Context, session: PlayerSession)
     fun play()
@@ -84,19 +91,48 @@ interface PlayerManager {
 
 @OptIn(UnstableApi::class)
 class PlayerManagerImpl(
-    private val appContext: Context
+    private val appContext: Context,
+    private val preferences: LauncherPreferences
 ) : PlayerManager {
+
+    private val httpDataSourceFactory: DefaultHttpDataSource.Factory by lazy {
+        DefaultHttpDataSource.Factory()
+            .setUserAgent("AbyssTVLauncher/1.0.0 (Android TV; Jellyfin)")
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(12_000)
+            .setReadTimeoutMs(20_000)
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var progressPollJob: Job? = null
+    private var isPositionPollingEnabled = true
+    private var mediaSession: android.media.session.MediaSession? = null
 
     private val _state = MutableStateFlow(PlayerPlaybackState())
     override val state: StateFlow<PlayerPlaybackState> = _state.asStateFlow()
 
+    private val _positionState = MutableStateFlow(PlayerPositionState())
+    override val positionState: StateFlow<PlayerPositionState> = _positionState.asStateFlow()
+
     private val _currentSession = MutableStateFlow<PlayerSession?>(null)
     override val currentSession: StateFlow<PlayerSession?> = _currentSession.asStateFlow()
 
-    private fun isBluetoothOrHeadsetConnected(): Boolean {
+    override fun setPositionPollingEnabled(enabled: Boolean) {
+        isPositionPollingEnabled = enabled
+        if (enabled && isPlayerCreated && player.isPlaying) {
+            val pos = player.currentPosition.coerceAtLeast(0L)
+            val buf = player.bufferedPosition.coerceAtLeast(0L)
+            _positionState.value = PlayerPositionState(pos, buf)
+            startProgressPolling()
+        } else if (!enabled) {
+            stopProgressPolling()
+        }
+    }
+
+    @Volatile
+    private var isBluetoothOrHeadsetConnected: Boolean = false
+
+    private fun queryBluetoothOrHeadsetConnected(): Boolean {
         val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
         val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
         return devices.any { device ->
@@ -105,8 +141,7 @@ class PlayerManagerImpl(
                 AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
                 AudioDeviceInfo.TYPE_WIRED_HEADSET,
                 AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-                AudioDeviceInfo.TYPE_USB_HEADSET,
-                AudioDeviceInfo.TYPE_USB_DEVICE -> true
+                AudioDeviceInfo.TYPE_USB_HEADSET -> true
                 else -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                         device.type == AudioDeviceInfo.TYPE_BLE_BROADCAST
@@ -129,16 +164,35 @@ class PlayerManagerImpl(
     private var isPlayerCreated = false
 
     init {
+        isBluetoothOrHeadsetConnected = queryBluetoothOrHeadsetConnected()
+        android.util.Log.w("AbyssAudio", "init btOrHeadset=$isBluetoothOrHeadsetConnected")
         val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         audioManager?.registerAudioDeviceCallback(object : AudioDeviceCallback() {
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                isBluetoothOrHeadsetConnected = queryBluetoothOrHeadsetConnected()
                 if (isPlayerCreated) scope.launch(Dispatchers.Main) { updateAudioRouting() }
             }
 
             override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                isBluetoothOrHeadsetConnected = queryBluetoothOrHeadsetConnected()
                 if (isPlayerCreated) scope.launch(Dispatchers.Main) { updateAudioRouting() }
             }
         }, null)
+    }
+
+    private fun stereoDownmixMatrix(inCh: Int): ChannelMixingMatrix {
+        val c = 0.70710677f
+        val coeffs = when (inCh) {
+            1, 2 -> return ChannelMixingMatrix.create(inCh, 2)
+            3 -> floatArrayOf(1f, 0f, 0f, 1f, c, c)
+            4 -> floatArrayOf(1f, 0f, 0f, 1f, c, 0f, 0f, c)
+            5 -> floatArrayOf(1f, 0f, 0f, 1f, c, c, c, 0f, 0f, c)
+            6 -> floatArrayOf(1f, 0f, 0f, 1f, c, c, 0f, 0f, c, 0f, 0f, c)
+            7 -> floatArrayOf(1f, 0f, 0f, 1f, c, c, 0f, 0f, 0.5f, 0.5f, c, 0f, 0f, c)
+            8 -> floatArrayOf(1f, 0f, 0f, 1f, c, c, 0f, 0f, c, 0f, 0f, c, c, 0f, 0f, c)
+            else -> FloatArray(inCh * 2) { i -> if (i < 2) 1f else 0f }
+        }
+        return ChannelMixingMatrix(inCh, 2, coeffs).scaleBy(0.5f)
     }
 
     private fun updateAudioRouting() {
@@ -152,12 +206,6 @@ class PlayerManagerImpl(
 
     override val player: ExoPlayer by lazy {
         isPlayerCreated = true
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("AbyssTVLauncher/1.0.0 (Android TV; Jellyfin)")
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(12_000)
-            .setReadTimeoutMs(20_000)
-
         val renderersFactory = object : DefaultRenderersFactory(appContext) {
             override fun buildAudioSink(
                 context: Context,
@@ -165,39 +213,40 @@ class PlayerManagerImpl(
                 enableAudioTrackPlaybackParams: Boolean
             ): AudioSink? {
                 val stereoDownmixer = ChannelMixingAudioProcessor().apply {
-                    for (inCh in 3..8) {
-                        runCatching {
-                            putChannelMixingMatrix(ChannelMixingMatrix.create(inCh, 2))
-                        }
+                    for (inCh in 1..8) {
+                        putChannelMixingMatrix(stereoDownmixMatrix(inCh))
                     }
-                }
-                val processors = if (isBluetoothOrHeadsetConnected()) {
-                    arrayOf(stereoDownmixer)
-                } else {
-                    emptyArray()
                 }
                 val sink = DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                    .setAudioProcessors(processors)
+                    .setAudioProcessors(arrayOf(stereoDownmixer))
                     .build()
                 return object : ForwardingAudioSink(sink) {
                     override fun getFormatSupport(format: Format): Int {
-                        if (isBluetoothOrHeadsetConnected() && format.sampleMimeType != MimeTypes.AUDIO_RAW) {
+                        if (isBluetoothOrHeadsetConnected && format.sampleMimeType != MimeTypes.AUDIO_RAW) {
+                            android.util.Log.w("AbyssAudio", "getFormatSupport UNSUPPORTED mime=${format.sampleMimeType} ch=${format.channelCount}")
                             return AudioSink.SINK_FORMAT_UNSUPPORTED
                         }
-                        return super.getFormatSupport(format)
+                        val res = super.getFormatSupport(format)
+                        android.util.Log.w("AbyssAudio", "getFormatSupport res=$res mime=${format.sampleMimeType} ch=${format.channelCount} pcm=${format.pcmEncoding} bt=$isBluetoothOrHeadsetConnected")
+                        return res
                     }
 
                     override fun supportsFormat(format: Format): Boolean {
-                        if (isBluetoothOrHeadsetConnected() && format.sampleMimeType != MimeTypes.AUDIO_RAW) {
+                        if (isBluetoothOrHeadsetConnected && format.sampleMimeType != MimeTypes.AUDIO_RAW) {
                             return false
                         }
                         return super.supportsFormat(format)
                     }
+
+                    override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
+                        android.util.Log.w("AbyssAudio", "configure mime=${inputFormat.sampleMimeType} ch=${inputFormat.channelCount} rate=${inputFormat.sampleRate} pcm=${inputFormat.pcmEncoding} bt=$isBluetoothOrHeadsetConnected")
+                        super.configure(inputFormat, specifiedBufferSize, outputChannels)
+                    }
                 }
             }
-        }.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+        }.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
 
         val loadControl = DefaultLoadControl.Builder()
@@ -236,15 +285,16 @@ class PlayerManagerImpl(
                 it.copy(
                     isBuffering = buffering,
                     isEnded = ended,
-                    durationMs = if (dur > 0L) dur else it.durationMs,
-                    currentPositionMs = pos
+                    durationMs = if (dur > 0L) dur else it.durationMs
                 )
             }
+            _positionState.update { it.copy(currentPositionMs = pos) }
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _state.update { it.copy(isPlaying = isPlaying) }
-            if (isPlaying) {
+            updateMediaSessionPlaybackState(isPlaying)
+            if (isPlaying && isPositionPollingEnabled) {
                 startProgressPolling()
             } else {
                 stopProgressPolling()
@@ -252,6 +302,14 @@ class PlayerManagerImpl(
         }
 
         override fun onTracksChanged(tracks: Tracks) {
+            for (g in tracks.groups) {
+                if (g.type == C.TRACK_TYPE_AUDIO) {
+                    for (i in 0 until g.length) {
+                        val f = g.getTrackFormat(i)
+                        android.util.Log.w("AbyssAudio", "track[$i] selected=${g.isTrackSelected(i)} supported=${g.isTrackSupported(i)} mime=${f.sampleMimeType} ch=${f.channelCount} lang=${f.language}")
+                    }
+                }
+            }
             refreshTracks(tracks)
         }
 
@@ -267,17 +325,15 @@ class PlayerManagerImpl(
 
     private fun startProgressPolling() {
         progressPollJob?.cancel()
+        if (!isPositionPollingEnabled) return
         progressPollJob = scope.launch {
             while (isActive) {
                 val pos = player.currentPosition.coerceAtLeast(0L)
                 val dur = player.duration.coerceAtLeast(0L)
                 val buf = player.bufferedPosition.coerceAtLeast(0L)
-                _state.update {
-                    it.copy(
-                        currentPositionMs = pos,
-                        durationMs = if (dur > 0L) dur else it.durationMs,
-                        bufferedPositionMs = buf
-                    )
+                _positionState.value = PlayerPositionState(pos, buf)
+                if (dur > 0L && _state.value.durationMs != dur) {
+                    _state.update { it.copy(durationMs = dur) }
                 }
                 delay(500L)
             }
@@ -302,18 +358,28 @@ class PlayerManagerImpl(
         player.trackSelectionParameters = player.trackSelectionParameters
             .buildUpon()
             .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .setSelectUndeterminedTextLanguage(false)
             .setMaxAudioChannelCount(Int.MAX_VALUE)
             .build()
 
-        val item = ExoMediaItem.fromUri(session.streamUrl)
+        ensureMediaSession(context, session)
+
+        val token = preferences.jellyfinConfig.accessToken
+        httpDataSourceFactory.setDefaultRequestProperties(
+            if (token.isNotBlank()) mapOf("X-Emby-Token" to token) else emptyMap()
+        )
+        val cleanUri = session.streamUrl
+            .replace(Regex("([?&])api_key=[^&]*&?"), "$1")
+            .trimEnd('&', '?')
+        val item = ExoMediaItem.fromUri(cleanUri)
         player.setMediaItem(item)
 
         if (session.startPositionMs > 0L) {
             player.seekTo(session.startPositionMs)
         } else if (session.savedResumePositionMs > 15_000L) {
             player.seekTo(session.savedResumePositionMs)
-            _state.update { it.copy(currentPositionMs = session.savedResumePositionMs) }
+            _positionState.update { it.copy(currentPositionMs = session.savedResumePositionMs) }
         }
 
         player.prepare()
@@ -338,7 +404,7 @@ class PlayerManagerImpl(
 
     override fun seekTo(positionMs: Long) {
         player.seekTo(positionMs)
-        _state.update { it.copy(currentPositionMs = positionMs) }
+        _positionState.update { it.copy(currentPositionMs = positionMs) }
     }
 
     override fun seekBy(deltaMs: Long) {
@@ -391,8 +457,55 @@ class PlayerManagerImpl(
         }
     }
 
+    private fun ensureMediaSession(context: Context, session: PlayerSession) {
+        val ms = mediaSession ?: android.media.session.MediaSession(context.applicationContext, "AbyssPlayerSession").also {
+            it.setCallback(object : android.media.session.MediaSession.Callback() {
+                override fun onPlay() { play() }
+                override fun onPause() { pause() }
+                override fun onFastForward() { seekBy(10_000L) }
+                override fun onRewind() { seekBy(-10_000L) }
+                override fun onSeekTo(pos: Long) { seekTo(pos) }
+            })
+            mediaSession = it
+        }
+        ms.setMetadata(
+            android.media.MediaMetadata.Builder()
+                .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, session.title)
+                .putString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, session.subtitle)
+                .build()
+        )
+        ms.isActive = true
+        updateMediaSessionPlaybackState(player.isPlaying)
+    }
+
+    private fun updateMediaSessionPlaybackState(isPlaying: Boolean) {
+        val ms = mediaSession ?: return
+        val pbState = if (isPlaying) {
+            android.media.session.PlaybackState.STATE_PLAYING
+        } else {
+            android.media.session.PlaybackState.STATE_PAUSED
+        }
+        val actions = android.media.session.PlaybackState.ACTION_PLAY or
+            android.media.session.PlaybackState.ACTION_PAUSE or
+            android.media.session.PlaybackState.ACTION_PLAY_PAUSE or
+            android.media.session.PlaybackState.ACTION_SEEK_TO or
+            android.media.session.PlaybackState.ACTION_FAST_FORWARD or
+            android.media.session.PlaybackState.ACTION_REWIND
+        ms.setPlaybackState(
+            android.media.session.PlaybackState.Builder()
+                .setActions(actions)
+                .setState(pbState, player.currentPosition.coerceAtLeast(0L), if (isPlaying) 1f else 0f)
+                .build()
+        )
+    }
+
     override fun release() {
         stopProgressPolling()
+        mediaSession?.let {
+            it.isActive = false
+            it.release()
+        }
+        mediaSession = null
         player.stop()
         player.clearMediaItems()
         player.trackSelectionParameters = player.trackSelectionParameters
@@ -499,8 +612,6 @@ class PlayerManagerImpl(
         } else ""
 
         return when {
-            langDisplay.isNotBlank() && cleanLabel.isNotBlank() && !cleanLabel.equals(langDisplay, ignoreCase = true) ->
-                "$langDisplay ($cleanLabel)"
             langDisplay.isNotBlank() -> langDisplay
             cleanLabel.isNotBlank() -> cleanLabel
             else -> defaultLabel
@@ -544,7 +655,8 @@ class PlayerManagerImpl(
             else -> ""
         }
         return if (isForced) {
-            if (base.isNotBlank()) "$base (Forcé)" else "Forcé"
+            if (base.isNotBlank()) appContext.getString(R.string.subtitle_forced_format, base)
+            else appContext.getString(R.string.subtitle_forced)
         } else base
     }
 }

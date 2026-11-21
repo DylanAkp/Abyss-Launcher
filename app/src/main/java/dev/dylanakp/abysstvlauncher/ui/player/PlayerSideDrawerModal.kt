@@ -46,7 +46,7 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
-import kotlinx.coroutines.delay
+import dev.dylanakp.abysstvlauncher.ui.components.RequestModalInitialFocus
 
 @Composable
 fun PlayerSideDrawerModal(
@@ -60,14 +60,12 @@ fun PlayerSideDrawerModal(
     val firstItemRequester = remember { FocusRequester() }
     val closeBtnRequester = remember { FocusRequester() }
 
-    LaunchedEffect(modalType) {
-        delay(80L)
-        try {
-            firstItemRequester.requestFocus()
-        } catch (_: Exception) {
-            try { closeBtnRequester.requestFocus() } catch (_: Exception) {}
-        }
-    }
+    RequestModalInitialFocus(
+        focusRequester = firstItemRequester,
+        modalType,
+        enabled = modalType != PlayerModalType.NONE,
+        fallbackRequester = closeBtnRequester
+    )
 
     val headerTitle = when (modalType) {
         PlayerModalType.AUDIO_TRACKS -> stringResource(R.string.audio_tracks_title)

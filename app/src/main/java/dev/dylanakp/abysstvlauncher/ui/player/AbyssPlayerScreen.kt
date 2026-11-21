@@ -44,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.dylanakp.abysstvlauncher.player.PlayerManager
@@ -124,7 +125,7 @@ enum class PlayerModalType {
 fun AbyssPlayerScreen(
     session: PlayerSession,
     onBack: (positionMs: Long, durationMs: Long) -> Unit,
-    onProgressUpdate: (positionMs: Long, durationMs: Long) -> Unit,
+    onProgressUpdate: (positionMs: Long, durationMs: Long, isPaused: Boolean, session: PlayerSession) -> Unit,
     onPlayNextEpisode: (SeriesEpisode?) -> Unit,
     onLaunchExternalFallback: (String, String) -> Unit,
     playerManager: PlayerManager = koinInject()
@@ -136,9 +137,7 @@ fun AbyssPlayerScreen(
     val isPlaying = playerState.isPlaying
     val isBuffering = playerState.isBuffering
     val playerError = playerState.error
-    val currentPositionMs = playerState.currentPositionMs
     val durationMs = playerState.durationMs
-    val bufferedPositionMs = playerState.bufferedPositionMs
     val audioTracks = playerState.audioTracks
     val subtitleTracks = playerState.subtitleTracks
     val videoResolutionBadge = playerState.videoResolutionBadge
@@ -147,6 +146,10 @@ fun AbyssPlayerScreen(
     var showOsd by remember { mutableStateOf(true) }
     var lastInteractionTick by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var activeModal by remember { mutableStateOf(PlayerModalType.NONE) }
+
+    LaunchedEffect(showOsd) {
+        playerManager.setPositionPollingEnabled(showOsd)
+    }
 
     // Rapid D-Pad seek accumulation state (-10s / +10s, +20s, +30s...)
     var accumulatedSeekDeltaMs by remember { mutableLongStateOf(0L) }
@@ -176,33 +179,40 @@ fun AbyssPlayerScreen(
             hasHandledCompletion = true
             val dur = playerState.durationMs
             if (dur > 0L) {
-                onProgressUpdate(dur, dur)
+                onProgressUpdate(dur, dur, false, session)
             }
             onPlayNextEpisode(session.nextEpisode)
         }
     }
 
     DisposableEffect(session.streamUrl) {
+        val capturedSession = session
         onDispose {
             val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
             val dur = exoPlayer.duration.coerceAtLeast(0L)
             if (dur > 0L) {
-                onProgressUpdate(pos, dur)
+                onProgressUpdate(pos, dur, true, capturedSession)
             }
             playerManager.release()
         }
     }
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val latestIsPlaying by rememberUpdatedState(isPlaying)
+    var pausedByLifecycle by remember { mutableStateOf(false) }
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             when (event) {
                 androidx.lifecycle.Lifecycle.Event.ON_PAUSE,
                 androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
-                    playerManager.pause()
+                    if (latestIsPlaying) {
+                        pausedByLifecycle = true
+                        playerManager.pause()
+                    }
                 }
                 androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
-                    if (isPlaying && !exoPlayer.isPlaying) {
+                    if (pausedByLifecycle) {
+                        pausedByLifecycle = false
                         playerManager.play()
                     }
                 }
@@ -215,18 +225,34 @@ fun AbyssPlayerScreen(
         }
     }
 
-    // Periodically report playback progress every 5 seconds
-    LaunchedEffect(currentPositionMs, durationMs) {
-        if (durationMs > 0L && currentPositionMs > 0L) {
-            onProgressUpdate(currentPositionMs, durationMs)
+    // Periodically report playback progress every 10 seconds while playing, and once when paused
+    LaunchedEffect(isPlaying, session.streamUrl) {
+        if (isPlaying) {
+            while (true) {
+                delay(10_000L)
+                val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                val dur = exoPlayer.duration.coerceAtLeast(0L)
+                if (dur > 0L && pos > 0L) {
+                    onProgressUpdate(pos, dur, false, session)
+                }
+            }
+        } else if (exoPlayer.playbackState == androidx.media3.common.Player.STATE_READY) {
+            val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
+            val dur = exoPlayer.duration.coerceAtLeast(0L)
+            if (dur > 0L && pos > 0L) {
+                onProgressUpdate(pos, dur, true, session)
+            }
         }
     }
 
-    // Continuously update wall-clock time every second so current hour and "Ends at" time stay accurate even when paused
-    LaunchedEffect(Unit) {
+    // Update wall-clock time on minute boundaries only while OSD is visible
+    LaunchedEffect(showOsd) {
+        if (!showOsd) return@LaunchedEffect
         while (true) {
-            currentWallClockMs = System.currentTimeMillis()
-            delay(1000L)
+            val now = System.currentTimeMillis()
+            currentWallClockMs = now
+            val delayMs = 60_000L - (now % 60_000L)
+            delay(delayMs.coerceAtLeast(1_000L))
         }
     }
 
@@ -251,22 +277,23 @@ fun AbyssPlayerScreen(
     }
 
     // Remote D-Pad Focus Management across OSD, Modals, Error Overlay, and Fullscreen Video
-    LaunchedEffect(showOsd, showResumePrompt, activeModal, playerError) {
-        delay(60L)
-        try {
-            when {
-                playerError != null -> retryButtonFocusRequester.requestFocus()
-                activeModal != PlayerModalType.NONE -> {}
-                showResumePrompt && showOsd -> resumeButtonFocusRequester.requestFocus()
-                showOsd -> playPauseFocusRequester.requestFocus()
-                else -> rootFocusRequester.requestFocus()
-            }
-        } catch (_: Exception) {}
+    val targetFocusRequester = when {
+        playerError != null -> retryButtonFocusRequester
+        activeModal != PlayerModalType.NONE -> null
+        showResumePrompt && showOsd -> resumeButtonFocusRequester
+        showOsd -> playPauseFocusRequester
+        else -> rootFocusRequester
+    }
+    if (targetFocusRequester != null) {
+        dev.dylanakp.abysstvlauncher.ui.components.RequestModalInitialFocus(
+            focusRequester = targetFocusRequester,
+            showOsd, showResumePrompt, activeModal, playerError
+        )
     }
 
     fun triggerSeekDelta(deltaMs: Long) {
         if (durationMs <= 0L) return
-        val basePos = if (seekPreviewTargetMs >= 0L) seekPreviewTargetMs else currentPositionMs
+        val basePos = if (seekPreviewTargetMs >= 0L) seekPreviewTargetMs else exoPlayer.currentPosition.coerceAtLeast(0L)
         accumulatedSeekDeltaMs += deltaMs
         seekPreviewTargetMs = (basePos + deltaMs).coerceIn(0L, durationMs)
         seekCommitTick = System.currentTimeMillis()
@@ -281,7 +308,7 @@ fun AbyssPlayerScreen(
                 lastInteractionTick = System.currentTimeMillis()
             }
             else -> {
-                onBack(currentPositionMs, durationMs)
+                onBack(exoPlayer.currentPosition.coerceAtLeast(0L), durationMs)
             }
         }
     }
@@ -302,7 +329,7 @@ fun AbyssPlayerScreen(
 
                 when (event.nativeKeyEvent.keyCode) {
                     KeyEvent.KEYCODE_HOME -> {
-                        onBack(currentPositionMs, durationMs)
+                        onBack(exoPlayer.currentPosition.coerceAtLeast(0L), durationMs)
                         true
                     }
                     KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
@@ -373,9 +400,10 @@ fun AbyssPlayerScreen(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     useController = false
+                    isFocusable = false
+                    isFocusableInTouchMode = false
                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     player = exoPlayer
-                    keepScreenOn = true
                     layoutParams = FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
@@ -399,6 +427,11 @@ fun AbyssPlayerScreen(
                 if (view.player !== exoPlayer) {
                     view.player = exoPlayer
                 }
+                view.keepScreenOn = isPlaying || isBuffering
+            },
+            onRelease = { view ->
+                view.keepScreenOn = false
+                view.player = null
             },
             modifier = Modifier.fillMaxSize()
         )
@@ -502,7 +535,7 @@ fun AbyssPlayerScreen(
                         OsdPillButton(
                             label = stringResource(R.string.btn_close),
                             icon = AbyssIconType.CLOSE,
-                            onClick = { onBack(currentPositionMs, durationMs) }
+                            onClick = { onBack(exoPlayer.currentPosition.coerceAtLeast(0L), durationMs) }
                         )
                     }
                 }
@@ -516,341 +549,47 @@ fun AbyssPlayerScreen(
             exit = fadeOut(tween(220)),
             modifier = Modifier.fillMaxSize()
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Top Vignette & Metadata Bar
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp)
-                        .align(Alignment.TopCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    AbyssVoid.copy(alpha = 0.90f),
-                                    AbyssVoid.copy(alpha = 0.50f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                        .padding(horizontal = 36.dp, vertical = 22.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                if (videoResolutionBadge.isNotBlank()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0x33FFFFFF))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = videoResolutionBadge,
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 9.sp
-                                            ),
-                                            color = AbyssTextPrimary
-                                        )
-                                    }
-                                }
-                                if (session.subtitle.isNotBlank()) {
-                                    Text(
-                                        text = session.subtitle,
-                                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
-                                        color = AbyssTextSecondary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = session.title,
-                                style = MaterialTheme.typography.headlineMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 22.sp
-                                ),
-                                color = AbyssTextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        // Top-right current wall-clock time & Ends At ("Fin à HH:mm")
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(Color(0x66101420))
-                                .padding(horizontal = 16.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            val nowStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(currentWallClockMs))
-                            Text(
-                                text = nowStr,
-                                style = MaterialTheme.typography.labelLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
-                                ),
-                                color = AbyssTextPrimary
-                            )
-
-                            val displayPos = if (seekPreviewTargetMs >= 0L) seekPreviewTargetMs else currentPositionMs
-                            val remainingMs = (durationMs - displayPos).coerceAtLeast(0L)
-                            if (durationMs > 0L && remainingMs > 0L) {
-                                val endsAtDate = Date(currentWallClockMs + remainingMs)
-                                val endsAtStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(endsAtDate)
-                                Text(
-                                    text = "•",
-                                    color = AbyssTextSecondary,
-                                    fontSize = 12.sp
-                                )
-                                Text(
-                                    text = stringResource(R.string.ends_at_fmt, endsAtStr),
-                                    style = MaterialTheme.typography.labelLarge.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 12.sp
-                                    ),
-                                    color = AbyssGold
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Bottom Vignette, Resume Banner, Seekbar & Controls
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    Color.Transparent,
-                                    AbyssVoid.copy(alpha = 0.70f),
-                                    AbyssVoid.copy(alpha = 0.96f)
-                                )
-                            )
-                        )
-                        .padding(horizontal = 36.dp, vertical = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    // Seamless Resume / Restart Banner if resumed from saved timestamp
-                    if (showResumePrompt) {
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xDD181D2A))
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text(
-                                text = stringResource(R.string.series_resume_at, formatDurationMs(session.savedResumePositionMs)),
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp
-                                ),
-                                color = AbyssTextPrimary
-                            )
-                            OsdPillButton(
-                                label = stringResource(R.string.cta_resume),
-                                icon = AbyssIconType.PLAY,
-                                isPrimary = true,
-                                focusRequester = resumeButtonFocusRequester,
-                                onClick = {
-                                    showResumePrompt = false
-                                    lastInteractionTick = System.currentTimeMillis()
-                                }
-                            )
-                            OsdPillButton(
-                                label = stringResource(R.string.restart_from_beginning),
-                                icon = AbyssIconType.RESTART,
-                                onClick = {
-                                    playerManager.seekTo(0L)
-                                    showResumePrompt = false
-                                    lastInteractionTick = System.currentTimeMillis()
-                                }
-                            )
-                        }
-                    }
-
-                    // Interactive Seekbar & Time Indicators (for VOD / Series)
-                    if (durationMs > 0L) {
-                        val effectivePos = if (seekPreviewTargetMs >= 0L) seekPreviewTargetMs else currentPositionMs
-                        val progressFraction = (effectivePos.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-                        val bufferedFraction = (bufferedPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-                        val remainingMs = (durationMs - effectivePos).coerceAtLeast(0L)
-                        val endsAtStr = SimpleDateFormat("HH:mm", Locale.getDefault())
-                            .format(Date(currentWallClockMs + remainingMs))
-
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${formatDurationMs(effectivePos)}  /  ${formatDurationMs(durationMs)}",
-                                    style = MaterialTheme.typography.labelLarge.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 13.sp
-                                    ),
-                                    color = AbyssTextPrimary
-                                )
-
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "-${formatDurationMs(remainingMs)}",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
-                                        color = AbyssTextSecondary
-                                    )
-                                    Text(
-                                        text = stringResource(R.string.ends_at_fmt, endsAtStr),
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp
-                                        ),
-                                        color = Color.White
-                                    )
-                                }
-                            }
-
-                            // Progress Track Bar
-                            var seekBarFocused by remember { mutableStateOf(false) }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(if (seekBarFocused) 10.dp else 6.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .background(Color(0x33FFFFFF))
-                                    .onFocusChanged { seekBarFocused = it.isFocused }
-                                    .onPreviewKeyEvent { ev ->
-                                        if (ev.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                            when (ev.nativeKeyEvent.keyCode) {
-                                                KeyEvent.KEYCODE_DPAD_LEFT -> {
-                                                    triggerSeekDelta(-10_000L)
-                                                    true
-                                                }
-                                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                                    triggerSeekDelta(10_000L)
-                                                    true
-                                                }
-                                                else -> false
-                                            }
-                                        } else false
-                                    }
-                                    .focusable()
-                            ) {
-                                // Buffered bar
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .fillMaxWidth(bufferedFraction)
-                                        .background(Color(0x55FFFFFF))
-                                )
-                                // Active progress bar
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .fillMaxWidth(progressFraction)
-                                        .background(if (seekBarFocused) AbyssGold else Color.White)
-                                )
-                            }
-                        }
-                    }
-
-                    // Control Buttons Row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OsdPillButton(
-                            label = if (isPlaying) {
-                                stringResource(R.string.player_pause)
-                            } else {
-                                stringResource(R.string.cta_play_stream)
-                            },
-                            icon = if (isPlaying) AbyssIconType.PAUSE else AbyssIconType.PLAY,
-                            isPrimary = true,
-                            focusRequester = playPauseFocusRequester,
-                            onClick = {
-                                if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
-                                lastInteractionTick = System.currentTimeMillis()
-                            }
-                        )
-
-                        OsdPillButton(
-                            label = "-10s",
-                            icon = AbyssIconType.SEEK_BACK_10,
-                            onClick = { triggerSeekDelta(-10_000L) }
-                        )
-                        OsdPillButton(
-                            label = "+10s",
-                            icon = AbyssIconType.SEEK_FORWARD_10,
-                            onClick = { triggerSeekDelta(10_000L) }
-                        )
-
-                        if (session.nextEpisode != null) {
-                            val nextEp = session.nextEpisode
-                            val isNearEnd = durationMs > 0L && (durationMs - currentPositionMs) < 180_000L
-                            val epCode = "S${nextEp.seasonNumber.toString().padStart(2, '0')}E${nextEp.episodeNumber.toString().padStart(2, '0')}"
-                            OsdPillButton(
-                                label = stringResource(R.string.player_next, epCode),
-                                icon = AbyssIconType.SKIP_NEXT,
-                                isPrimary = isNearEnd,
-                                onClick = {
-                                    onProgressUpdate(currentPositionMs, durationMs)
-                                    onPlayNextEpisode(nextEp)
-                                }
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.weight(1f, fill = false))
-
-                        val activeAudioLabel = audioTracks.firstOrNull { it.isSelected }?.label
-                        val audioTitle = stringResource(R.string.audio_tracks_title)
-                        OsdPillButton(
-                            label = activeAudioLabel?.ifBlank { audioTitle } ?: audioTitle,
-                            icon = AbyssIconType.AUDIO_SPEAKER,
-                            onClick = {
-                                activeModal = PlayerModalType.AUDIO_TRACKS
-                                lastInteractionTick = System.currentTimeMillis()
-                            }
-                        )
-
-                        val activeSub = subtitleTracks.firstOrNull { it.isSelected && !it.isOffOption }
-                        val subTitle = stringResource(R.string.subtitles_title)
-                        val subLabel = activeSub?.label?.ifBlank { subTitle } ?: subTitle
-                        OsdPillButton(
-                            label = subLabel,
-                            icon = AbyssIconType.SUBTITLES_CC,
-                            onClick = {
-                                activeModal = PlayerModalType.SUBTITLE_TRACKS
-                                lastInteractionTick = System.currentTimeMillis()
-                            }
-                        )
-
-                        OsdPillButton(
-                            label = stringResource(R.string.btn_exit),
-                            icon = AbyssIconType.CLOSE,
-                            onClick = { onBack(currentPositionMs, durationMs) }
-                        )
-                    }
-                }
-            }
+            PlayerOsdOverlay(
+                session = session,
+                videoResolutionBadge = videoResolutionBadge,
+                currentWallClockMs = currentWallClockMs,
+                seekPreviewTargetMs = seekPreviewTargetMs,
+                positionStateFlow = playerManager.positionState,
+                durationMs = durationMs,
+                isPlaying = isPlaying,
+                showResumePrompt = showResumePrompt,
+                audioTracks = audioTracks,
+                subtitleTracks = subtitleTracks,
+                resumeButtonFocusRequester = resumeButtonFocusRequester,
+                playPauseFocusRequester = playPauseFocusRequester,
+                onResumeConfirmed = {
+                    showResumePrompt = false
+                    lastInteractionTick = System.currentTimeMillis()
+                },
+                onRestartFromBeginning = {
+                    playerManager.seekTo(0L)
+                    showResumePrompt = false
+                    lastInteractionTick = System.currentTimeMillis()
+                },
+                onSeekDelta = ::triggerSeekDelta,
+                onTogglePlayPause = {
+                    if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                    lastInteractionTick = System.currentTimeMillis()
+                },
+                onPlayNextEpisode = { nextEp ->
+                    onProgressUpdate(exoPlayer.currentPosition.coerceAtLeast(0L), durationMs, true, session)
+                    onPlayNextEpisode(nextEp)
+                },
+                onOpenAudioTracks = {
+                    activeModal = PlayerModalType.AUDIO_TRACKS
+                    lastInteractionTick = System.currentTimeMillis()
+                },
+                onOpenSubtitleTracks = {
+                    activeModal = PlayerModalType.SUBTITLE_TRACKS
+                    lastInteractionTick = System.currentTimeMillis()
+                },
+                onExit = { onBack(exoPlayer.currentPosition.coerceAtLeast(0L), durationMs) }
+            )
         }
 
         // 5. Audio / Subtitle / Live Channel Selection Side Drawer Modal
