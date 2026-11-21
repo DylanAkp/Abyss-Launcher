@@ -34,6 +34,9 @@ interface JellyfinRepository {
     suspend fun markWatched(config: JellyfinConfig, itemId: String)
     suspend fun markUnwatched(config: JellyfinConfig, itemId: String)
     suspend fun search(config: JellyfinConfig, query: String): List<MediaItem>
+    suspend fun reportCapabilities(config: JellyfinConfig): Boolean
+    fun buildWebSocketUrl(config: JellyfinConfig): String?
+    fun buildAuthHeaderValue(token: String = ""): String
 }
 
 interface SeerRepository {

@@ -2,6 +2,7 @@ package dev.dylanakp.abysstvlauncher.di
 
 import dev.dylanakp.abysstvlauncher.data.AppUpdateRepository
 import dev.dylanakp.abysstvlauncher.data.JellyfinRepository
+import dev.dylanakp.abysstvlauncher.data.JellyfinWebSocketClient
 import dev.dylanakp.abysstvlauncher.data.LauncherPreferences
 import dev.dylanakp.abysstvlauncher.data.MediaLibraryCache
 import dev.dylanakp.abysstvlauncher.data.PlaybackHistoryRepository
@@ -68,6 +69,7 @@ val appModule = module {
     single { LauncherPreferences(androidContext()) }
 
     single<IJellyfinRepository> { JellyfinRepository }
+    single { JellyfinWebSocketClient(get(), get(), get()) }
     single<ISeerRepository> { SeerRepository }
     single<ITmdbRepository> { TmdbRepository }
     single<IWeatherRepository> { WeatherRepository }

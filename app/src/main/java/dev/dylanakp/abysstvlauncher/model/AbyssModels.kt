@@ -277,3 +277,11 @@ data class SyncedLibrary(
     val seerPopularTv: List<MediaItem> = emptyList(),
     val seerRequests: List<MediaItem> = emptyList()
 )
+
+@Immutable
+data class JellyfinDisplayMessage(
+    val id: Long = System.nanoTime(),
+    val header: String = "",
+    val text: String = "",
+    val timeoutMs: Long = 6000L
+)

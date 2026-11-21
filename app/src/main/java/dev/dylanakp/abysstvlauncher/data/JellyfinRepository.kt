@@ -154,6 +154,14 @@ private data class JellyfinPlaybackStoppedPayload(
     @SerialName("PositionTicks") val positionTicks: Long
 )
 
+@Serializable
+private data class JellyfinCapabilitiesPayload(
+    @SerialName("PlayableMediaTypes") val playableMediaTypes: List<String> = listOf("Video"),
+    @SerialName("SupportedCommands") val supportedCommands: List<String> = listOf("DisplayMessage"),
+    @SerialName("SupportsMediaControl") val supportsMediaControl: Boolean = true,
+    @SerialName("SupportsPersistentIdentifier") val supportsPersistentIdentifier: Boolean = true
+)
+
 object JellyfinRepository : IJellyfinRepository, KoinComponent {
 
     private const val CLIENT_NAME = "AbyssLauncher"
@@ -1087,5 +1095,28 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
             Log.w("AbyssJellyfin", "Failed to parse Jellyfin search results", e)
         }
         results
+    }
+
+    override fun buildAuthHeaderValue(token: String): String = buildAuthHeader(token)
+
+    override fun buildWebSocketUrl(config: JellyfinConfig): String? {
+        val server = cleanUrl(config.serverUrl)
+        val token = config.accessToken
+        if (server.isBlank() || token.isBlank()) return null
+        val wsBase = when {
+            server.startsWith("https://", ignoreCase = true) -> "wss://${server.substring(8)}"
+            server.startsWith("http://", ignoreCase = true) -> "ws://${server.substring(7)}"
+            else -> return null
+        }
+        val encToken = URLEncoder.encode(token, "UTF-8")
+        val encDeviceId = URLEncoder.encode(resolveDeviceId(), "UTF-8")
+        return "$wsBase/socket?api_key=$encToken&deviceId=$encDeviceId"
+    }
+
+    override suspend fun reportCapabilities(config: JellyfinConfig): Boolean = withContext(Dispatchers.IO) {
+        val server = cleanUrl(config.serverUrl)
+        if (server.isBlank() || config.accessToken.isBlank()) return@withContext false
+        val body = json.encodeToString(JellyfinCapabilitiesPayload())
+        httpPost("$server/Sessions/Capabilities/Full", config.accessToken, body)
     }
 }
