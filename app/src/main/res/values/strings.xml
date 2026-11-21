@@ -287,4 +287,10 @@
     <string name="remote_acc_access_title">Cross-App Navigation (Accessibility)</string>
     <string name="remote_acc_access_on">Enabled — Back &amp; Home work outside Abyss Launcher</string>
     <string name="remote_acc_access_off">Off — tap to enable Accessibility Service</string>
+    <string name="err_cannot_launch_app">Cannot launch %s</string>
+    <string name="status_jellyfin_online">Jellyfin Online</string>
+    <string name="status_jellyfin_offline">Jellyfin Offline</string>
+    <string name="badge_direct">DIRECT</string>
+    <string name="subtitle_forced">Forced</string>
+    <string name="subtitle_forced_format">%s (Forced)</string>
 </resources>

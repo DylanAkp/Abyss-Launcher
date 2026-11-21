@@ -287,4 +287,10 @@
     <string name="remote_acc_access_title">Navigation multi-apps (Accessibilité)</string>
     <string name="remote_acc_access_on">Activée — Retour et Accueil fonctionnent hors Abyss</string>
     <string name="remote_acc_access_off">Désactivée — activer le service d\'accessibilité</string>
+    <string name="err_cannot_launch_app">Impossible de lancer %s</string>
+    <string name="status_jellyfin_online">Jellyfin en ligne</string>
+    <string name="status_jellyfin_offline">Jellyfin hors ligne</string>
+    <string name="badge_direct">DIRECT</string>
+    <string name="subtitle_forced">Forcé</string>
+    <string name="subtitle_forced_format">%s (Forcé)</string>
 </resources>

@@ -18,6 +18,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +36,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +50,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,13 +71,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.MediaVersion
 import dev.dylanakp.abysstvlauncher.model.PlaybackHistoryEntry
 import dev.dylanakp.abysstvlauncher.model.SeriesDetails
 import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
+import dev.dylanakp.abysstvlauncher.model.SeriesSeason
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderFocus
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
 import dev.dylanakp.abysstvlauncher.theme.AbyssGold
@@ -87,6 +92,68 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssVoid
 import dev.dylanakp.abysstvlauncher.ui.player.formatDurationMs
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+internal fun resolveEpisodeProgress(
+    ep: SeriesEpisode,
+    playbackHistory: Map<String, PlaybackHistoryEntry>
+): Float {
+    val hist = playbackHistory[ep.id]
+    return when {
+        hist != null -> hist.progressPercent
+        playbackHistory.containsKey(ep.id) -> 0f
+        ep.progressPercent > 0f -> ep.progressPercent
+        else -> 0f
+    }
+}
+
+internal fun resolveEpisodeSavedPosition(
+    ep: SeriesEpisode,
+    playbackHistory: Map<String, PlaybackHistoryEntry>
+): Long {
+    val hist = playbackHistory[ep.id]
+    val prog = resolveEpisodeProgress(ep, playbackHistory)
+    return when {
+        hist != null && prog < 0.95f -> hist.positionMs
+        ep.savedPositionMs > 1_000L && prog < 0.95f -> ep.savedPositionMs
+        else -> 0L
+    }
+}
+
+internal fun resolveSeriesResumeTarget(
+    seasons: List<SeriesSeason>,
+    seriesResumeEntry: PlaybackHistoryEntry?,
+    playbackHistory: Map<String, PlaybackHistoryEntry>
+): Triple<SeriesEpisode, Long, Boolean>? {
+    if (seasons.isEmpty()) return null
+    val allEps = seasons.flatMap { it.episodes }
+    if (allEps.isEmpty()) return null
+
+    if (seriesResumeEntry != null) {
+        val matched = allEps.firstOrNull {
+            it.seasonNumber == seriesResumeEntry.seasonNumber &&
+                it.episodeNumber == seriesResumeEntry.episodeNumber
+        }
+        if (matched != null) {
+            val progress = resolveEpisodeProgress(matched, playbackHistory)
+            val pos = resolveEpisodeSavedPosition(matched, playbackHistory)
+            return if (progress >= 0.95f) {
+                val idx = allEps.indexOfFirst { it.id == matched.id }
+                val nextEp = allEps.drop(idx + 1).firstOrNull { resolveEpisodeProgress(it, playbackHistory) < 0.95f }
+                    ?: allEps.firstOrNull { resolveEpisodeProgress(it, playbackHistory) < 0.95f }
+                    ?: matched
+                Triple(nextEp, resolveEpisodeSavedPosition(nextEp, playbackHistory), true)
+            } else {
+                Triple(matched, pos, true)
+            }
+        }
+    }
+
+    val inProgressEp = allEps.firstOrNull { resolveEpisodeProgress(it, playbackHistory) in 0.01f..0.94f }
+    val target = inProgressEp
+        ?: allEps.firstOrNull { resolveEpisodeProgress(it, playbackHistory) < 0.95f }
+        ?: allEps.first()
+    return Triple(target, resolveEpisodeSavedPosition(target, playbackHistory), inProgressEp != null)
+}
 
 @Composable
 fun SeriesDetailScreen(
@@ -131,84 +198,40 @@ fun SeriesDetailScreen(
     val episodes = currentSeason?.episodes.orEmpty()
 
     // Helper to get unified progress combining local database history and server (Jellyfin) progress
-    fun getEpisodeProgress(ep: SeriesEpisode): Float {
-        val hist = playbackHistory[ep.id]
-        return when {
-            hist != null -> hist.progressPercent
-            playbackHistory.containsKey(ep.id) -> 0f
-            ep.progressPercent > 0f -> ep.progressPercent
-            else -> 0f
-        }
-    }
+    fun getEpisodeProgress(ep: SeriesEpisode): Float =
+        resolveEpisodeProgress(ep, playbackHistory)
 
-    fun getEpisodeSavedPosition(ep: SeriesEpisode): Long {
-        val hist = playbackHistory[ep.id]
-        val prog = getEpisodeProgress(ep)
-        return when {
-            hist != null && prog < 0.95f -> hist.positionMs
-            ep.savedPositionMs > 1_000L && prog < 0.95f -> ep.savedPositionMs
-            else -> 0L
-        }
-    }
+    fun getEpisodeSavedPosition(ep: SeriesEpisode): Long =
+        resolveEpisodeSavedPosition(ep, playbackHistory)
 
     // Determine target episode to Continue or Start from S01E01
     val resumeTargetEpisode: Triple<SeriesEpisode, Long, Boolean>? = remember(seriesDetails, playbackHistory) {
-        if (seasons.isEmpty()) null
-        else {
-            val allEps = seasons.flatMap { it.episodes }
-            if (seriesResumeEntry != null) {
-                val matched = allEps.firstOrNull {
-                    it.seasonNumber == seriesResumeEntry.seasonNumber &&
-                        it.episodeNumber == seriesResumeEntry.episodeNumber
-                }
-                if (matched != null) {
-                    val progress = getEpisodeProgress(matched)
-                    val pos = getEpisodeSavedPosition(matched)
-                    if (progress >= 0.95f) {
-                        // Episode was finished -> offer the next unwatched episode!
-                        val idx = allEps.indexOfFirst { it.id == matched.id }
-                        val nextEp = allEps.drop(idx + 1).firstOrNull { getEpisodeProgress(it) < 0.95f }
-                            ?: allEps.firstOrNull { getEpisodeProgress(it) < 0.95f }
-                            ?: matched
-                        val nextPos = getEpisodeSavedPosition(nextEp)
-                        Triple(nextEp, nextPos, true)
-                    } else {
-                        Triple(matched, pos, true)
-                    }
-                } else {
-                    val inProgressEp = allEps.firstOrNull { getEpisodeProgress(it) in 0.01f..0.94f }
-                    val target = inProgressEp ?: allEps.firstOrNull { getEpisodeProgress(it) < 0.95f } ?: allEps.first()
-                    Triple(target, getEpisodeSavedPosition(target), inProgressEp != null)
-                }
-            } else {
-                // If no local history entry for the series, check if Jellyfin server returned in-progress episode
-                val inProgressEp = allEps.firstOrNull { getEpisodeProgress(it) in 0.01f..0.94f }
-                val target = inProgressEp ?: allEps.firstOrNull { getEpisodeProgress(it) < 0.95f } ?: allEps.first()
-                Triple(target, getEpisodeSavedPosition(target), inProgressEp != null)
-            }
-        }
+        resolveSeriesResumeTarget(seasons, seriesResumeEntry, playbackHistory)
     }
 
+    val allEpisodes = remember(seasons) { seasons.flatMap { it.episodes } }
+
     fun findNextEpisode(currentEp: SeriesEpisode): SeriesEpisode? {
-        val allEps = seasons.flatMap { it.episodes }
-        val idx = allEps.indexOfFirst { it.id == currentEp.id }
-        return if (idx != -1 && idx + 1 < allEps.size) allEps[idx + 1] else null
+        val idx = allEpisodes.indexOfFirst { it.id == currentEp.id }
+        return if (idx != -1 && idx + 1 < allEpisodes.size) allEpisodes[idx + 1] else null
     }
 
     val continueButtonRequester = remember { FocusRequester() }
-    val firstSeasonTabRequester = remember { FocusRequester() }
-    val firstEpisodeRequester = remember { FocusRequester() }
-
-    LaunchedEffect(isLoading, seriesDetails) {
-        if (!isLoading) {
-            delay(150L) // Increased delay to ensure UI is ready
-            try {
-                continueButtonRequester.requestFocus()
-            } catch (e: Exception) {
-                try { firstEpisodeRequester.requestFocus() } catch (_: Exception) {}
-            }
+    val selectedSeasonFocusRequester = remember { FocusRequester() }
+    val heroBringIntoViewRequester = remember { BringIntoViewRequester() }
+    val scrollHeroToTop: () -> Unit = {
+        coroutineScope.launch {
+            withFrameNanos { }
+            heroBringIntoViewRequester.bringIntoView()
         }
     }
+
+    RequestModalInitialFocus(
+        focusRequester = continueButtonRequester,
+        isLoading,
+        seriesDetails,
+        enabled = !isLoading
+    )
 
     Box(
         modifier = modifier
@@ -217,7 +240,15 @@ fun SeriesDetailScreen(
     ) {
         LazyColumn(
             state = pageListState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .focusProperties {
+                    onEnter = {
+                        if (episodeForMenu != null || episodeForVersionPicker != null) {
+                            cancelFocusChange()
+                        }
+                    }
+                },
             contentPadding = PaddingValues(bottom = 48.dp)
         ) {
             // 1. FULL-BLEED 16:9 CINEMA HERO HEADER FOR THE SERIES
@@ -226,6 +257,7 @@ fun SeriesDetailScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(360.dp)
+                        .bringIntoViewRequester(heroBringIntoViewRequester)
                         .background(AbyssVoid)
                 ) {
                     HeroBackdropArtwork(
@@ -343,12 +375,7 @@ fun SeriesDetailScreen(
                                     icon = AbyssIconType.PLAY,
                                     isPrimary = true,
                                     focusRequester = continueButtonRequester,
-                                    onNavigateDown = {
-                                        try {
-                                            if (seasons.size > 1) firstSeasonTabRequester.requestFocus()
-                                            else firstEpisodeRequester.requestFocus()
-                                        } catch (_: Exception) {}
-                                    },
+                                    onFocused = scrollHeroToTop,
                                     onClick = {
                                         onPlayEpisode(ep, findNextEpisode(ep), savedPos)
                                     }
@@ -358,12 +385,7 @@ fun SeriesDetailScreen(
                                     SeriesActionPill(
                                         label = stringResource(R.string.series_restart_ep, epCode),
                                         icon = AbyssIconType.RESTART,
-                                        onNavigateDown = {
-                                            try {
-                                                if (seasons.size > 1) firstSeasonTabRequester.requestFocus()
-                                                else firstEpisodeRequester.requestFocus()
-                                            } catch (_: Exception) {}
-                                        },
+                                        onFocused = scrollHeroToTop,
                                         onClick = {
                                             onPlayEpisode(ep, findNextEpisode(ep), 0L)
                                         }
@@ -376,12 +398,7 @@ fun SeriesDetailScreen(
                                     SeriesActionPill(
                                         label = activeVer?.name ?: stringResource(R.string.movie_versions_title),
                                         icon = AbyssIconType.CHEVRON_DOWN,
-                                        onNavigateDown = {
-                                            try {
-                                                if (seasons.size > 1) firstSeasonTabRequester.requestFocus()
-                                                else firstEpisodeRequester.requestFocus()
-                                            } catch (_: Exception) {}
-                                        },
+                                        onFocused = scrollHeroToTop,
                                         onClick = {
                                             episodeForVersionPicker = ep
                                         }
@@ -393,6 +410,7 @@ fun SeriesDetailScreen(
                                     icon = AbyssIconType.ARROW_LEFT,
                                     isPrimary = true,
                                     focusRequester = continueButtonRequester,
+                                    onFocused = scrollHeroToTop,
                                     onClick = onBack
                                 )
                             }
@@ -451,6 +469,7 @@ fun SeriesDetailScreen(
                             .fillMaxWidth()
                             .padding(top = 8.dp, bottom = 8.dp)
                     ) {
+                        val watchedInSeason = episodes.count { getEpisodeProgress(it) >= 0.95f }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -458,47 +477,93 @@ fun SeriesDetailScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = stringResource(R.string.series_seasons_label),
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.sp,
-                                    fontSize = 11.sp
-                                ),
-                                color = AbyssTextSecondary
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.series_seasons_label),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.sp,
+                                        fontSize = 11.sp
+                                    ),
+                                    color = AbyssTextSecondary
+                                )
+                                if (episodes.isNotEmpty()) {
+                                    val seasonFraction = (watchedInSeason.toFloat() / episodes.size.toFloat()).coerceIn(0f, 1f)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(56.dp)
+                                                .height(4.dp)
+                                                .clip(RoundedCornerShape(50))
+                                                .background(Color(0x33FFFFFF))
+                                        ) {
+                                            if (seasonFraction > 0f) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxHeight()
+                                                        .fillMaxWidth(seasonFraction)
+                                                        .clip(RoundedCornerShape(50))
+                                                        .background(AbyssGold)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = "$watchedInSeason/${episodes.size}",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 10.sp
+                                            ),
+                                            color = if (watchedInSeason > 0) AbyssGold else AbyssTextMuted
+                                        )
+                                    }
+                                }
+                            }
                             Text(
                                 text = stringResource(R.string.series_hold_ok_hint),
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                                 color = AbyssTextMuted
                             )
                         }
+                        var pendingSeasonFocus by remember { mutableStateOf<Int?>(null) }
+                        val visualSelectedSeasonIndex = pendingSeasonFocus ?: selectedSeasonIndex
+                        LaunchedEffect(pendingSeasonFocus) {
+                            val target = pendingSeasonFocus ?: return@LaunchedEffect
+                            kotlinx.coroutines.delay(120L)
+                            selectedSeasonIndex = target
+                            pendingSeasonFocus = null
+                        }
                         LazyRow(
+                            modifier = Modifier
+                                .focusProperties {
+                                    onEnter = {
+                                        runCatching { selectedSeasonFocusRequester.requestFocus() }
+                                    }
+                                }
+                                .focusGroup(),
                             contentPadding = PaddingValues(horizontal = 36.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            itemsIndexed(seasons, key = { _, s -> s.seasonNumber }) { idx, season ->
-                                val isSelected = idx == selectedSeasonIndex
+                            itemsIndexed(
+                                items = seasons,
+                                key = { _, s -> s.seasonNumber },
+                                contentType = { _, _ -> "season_pill" }
+                            ) { idx, season ->
+                                val isSelected = idx == visualSelectedSeasonIndex
                                 SeriesActionPill(
                                     label = "${season.name}  (${season.episodes.size})",
                                     isPrimary = isSelected,
-                                    focusRequester = if (idx == selectedSeasonIndex) firstSeasonTabRequester else null,
-                                    onFocused = { selectedSeasonIndex = idx },
-                                    onNavigateUp = {
-                                        coroutineScope.launch {
-                                            pageListState.animateScrollToItem(0)
-                                            try { continueButtonRequester.requestFocus() } catch (_: Exception) {}
-                                        }
-                                    },
-                                    onNavigateDown = {
-                                        coroutineScope.launch {
-                                            if (episodes.isNotEmpty()) {
-                                                pageListState.animateScrollToItem(2)
-                                                try { firstEpisodeRequester.requestFocus() } catch (_: Exception) {}
-                                            }
-                                        }
-                                    },
-                                    onClick = { selectedSeasonIndex = idx }
+                                    focusRequester = if (idx == selectedSeasonIndex) selectedSeasonFocusRequester else null,
+                                    onFocused = { pendingSeasonFocus = if (idx != selectedSeasonIndex) idx else null },
+                                    onClick = {
+                                        pendingSeasonFocus = null
+                                        selectedSeasonIndex = idx
+                                    }
                                 )
                             }
                         }
@@ -506,7 +571,11 @@ fun SeriesDetailScreen(
                 }
 
                 // 3. DETAILED EPISODE CARDS LIST
-                itemsIndexed(episodes, key = { _, ep -> ep.id }) { idx, ep ->
+                itemsIndexed(
+                    items = episodes,
+                    key = { _, ep -> ep.id },
+                    contentType = { _, _ -> "episode_card" }
+                ) { _, ep ->
                     val progress = getEpisodeProgress(ep)
                     val savedPos = getEpisodeSavedPosition(ep)
 
@@ -515,19 +584,6 @@ fun SeriesDetailScreen(
                         seriesBackdropFallback = seriesItem.backdropUrl.ifBlank { seriesItem.posterUrl },
                         progressPercent = progress,
                         savedPositionMs = savedPos,
-                        focusRequester = if (idx == 0) firstEpisodeRequester else null,
-                        onNavigateUp = if (idx == 0) {
-                            {
-                                if (seasons.size > 1) {
-                                    try { firstSeasonTabRequester.requestFocus() } catch (_: Exception) {}
-                                } else {
-                                    coroutineScope.launch {
-                                        pageListState.animateScrollToItem(0)
-                                        try { continueButtonRequester.requestFocus() } catch (_: Exception) {}
-                                    }
-                                }
-                            }
-                        } else null,
                         onClick = {
                             onPlayEpisode(ep, findNextEpisode(ep), savedPos)
                         },
@@ -595,42 +651,25 @@ private fun EpisodeVersionPickerDialog(
     val firstRequester = remember { FocusRequester() }
     val selectedId = episode.selectedVersionId ?: episode.versions.firstOrNull()?.id
 
-    LaunchedEffect(episode.id) {
-        delay(60L)
-        try { firstRequester.requestFocus() } catch (_: Exception) {}
-    }
+    RequestModalInitialFocus(
+        focusRequester = firstRequester,
+        episode.id
+    )
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    AbyssModalOverlay(
+        scrimColor = Color(0xA6000000),
+        onDismiss = onDismiss
     ) {
-        Box(
+        Column(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xA6000000))
-                .focusProperties { canFocus = false }
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismiss
-                ),
-            contentAlignment = Alignment.Center
+                .width(520.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color(0xFF191C24))
+                .border(1.dp, Color(0x24FFFFFF), RoundedCornerShape(28.dp))
+                .pointerInput(Unit) { detectTapGestures { } }
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .width(520.dp)
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(Color(0xFF191C24))
-                    .border(1.dp, Color(0x24FFFFFF), RoundedCornerShape(28.dp))
-                    .focusProperties { canFocus = false }
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {}
-                    )
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
                 val epCode = "S${episode.seasonNumber.toString().padStart(2, '0')}E${episode.episodeNumber.toString().padStart(2, '0')}"
                 Text(
                     text = "${stringResource(R.string.movie_versions_title)} • $epCode",
@@ -641,7 +680,11 @@ private fun EpisodeVersionPickerDialog(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    itemsIndexed(episode.versions) { index, ver ->
+                    itemsIndexed(
+                        items = episode.versions,
+                        key = { _, ver -> ver.id },
+                        contentType = { _, _ -> "version_card" }
+                    ) { index, ver ->
                         EpisodeVersionRow(
                             version = ver,
                             isSelected = ver.id == selectedId,
@@ -653,7 +696,6 @@ private fun EpisodeVersionPickerDialog(
             }
         }
     }
-}
 
 @Composable
 private fun EpisodeVersionRow(

@@ -8,6 +8,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -65,50 +66,39 @@ fun DetailedEpisodeCard(
     progressPercent: Float,
     savedPositionMs: Long,
     modifier: Modifier = Modifier,
-    focusRequester: FocusRequester? = null,
-    onNavigateUp: (() -> Unit)? = null,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var longClickHandled by remember { mutableStateOf(false) }
 
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.02f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "epCardScale"
-    )
-    val bgColor by animateColorAsState(
-        targetValue = if (isFocused) Color.White else AbyssSurfaceGlass,
-        animationSpec = tween(120),
-        label = "epCardBg"
-    )
-
+    val bgColor = if (isFocused) Color.White else AbyssSurfaceGlass
     val primaryTextColor = if (isFocused) Color.Black else AbyssTextPrimary
     val secondaryTextColor = if (isFocused) Color(0xFF444444) else AbyssTextSecondary
+    val effectiveProgress = when {
+        progressPercent > 0f -> progressPercent.coerceIn(0f, 1f)
+        savedPositionMs > 0L -> 0.03f
+        else -> 0f
+    }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = if (isFocused) 1.02f else 1f
+                scaleX = s
+                scaleY = s
             }
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(bgColor)
+            .border(
+                width = if (isFocused) 1.5.dp else 1.dp,
+                color = if (isFocused) Color.White else Color(0x22FFFFFF),
+                shape = RoundedCornerShape(14.dp)
+            )
             .onFocusChanged { isFocused = it.isFocused }
             .onPreviewKeyEvent { event ->
-                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
-                    event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP &&
-                    onNavigateUp != null
-                ) {
-                    onNavigateUp.invoke()
-                    true
-                } else if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
                     event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER ||
                     event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
                 ) {
@@ -179,7 +169,7 @@ fun DetailedEpisodeCard(
                     )
                 }
 
-                if (progressPercent >= 0.95f) {
+                if (effectiveProgress >= 0.95f) {
                     Box(
                         modifier = Modifier
                             .padding(6.dp)
@@ -227,18 +217,18 @@ fun DetailedEpisodeCard(
                     }
                 }
 
-                if (progressPercent > 0.01f) {
+                if (effectiveProgress > 0f) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(4.dp)
                             .align(Alignment.BottomCenter)
-                            .background(Color(0x88000000))
+                            .background(Color(0x99000000))
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxHeight()
-                                .fillMaxWidth(progressPercent.coerceIn(0f, 1f))
+                                .fillMaxWidth(effectiveProgress.coerceAtLeast(0.03f))
                                 .background(AbyssGold)
                         )
                     }
@@ -279,7 +269,7 @@ fun DetailedEpisodeCard(
                                 ),
                                 color = if (isFocused) Color.Black else AbyssGold
                             )
-                        } else if (progressPercent >= 0.95f) {
+                        } else if (effectiveProgress >= 0.95f) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -328,6 +318,40 @@ fun DetailedEpisodeCard(
                         color = secondaryTextColor
                     )
                 }
+
+                if (effectiveProgress > 0f && effectiveProgress < 0.95f) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(if (isFocused) Color(0x33000000) else Color(0x33FFFFFF))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(effectiveProgress.coerceAtLeast(0.03f))
+                                    .clip(RoundedCornerShape(50))
+                                    .background(if (isFocused) Color(0xFFB45309) else AbyssGold)
+                            )
+                        }
+                        Text(
+                            text = "${(effectiveProgress * 100).toInt().coerceIn(1, 99)}%",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            ),
+                            color = if (isFocused) Color(0xFFB45309) else AbyssGold
+                        )
+                    }
+                }
             }
         }
     }
@@ -356,26 +380,15 @@ fun SeriesActionPill(
     isPrimary: Boolean = false,
     focusRequester: FocusRequester? = null,
     onFocused: (() -> Unit)? = null,
-    onNavigateUp: (() -> Unit)? = null,
-    onNavigateDown: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1f,
-        animationSpec = tween(110),
-        label = "seriesActionScale"
-    )
-    val bgColor by animateColorAsState(
-        targetValue = when {
-            isFocused -> Color.White
-            isPrimary -> Color(0x38FFFFFF)
-            else -> AbyssPillGlass
-        },
-        animationSpec = tween(110),
-        label = "seriesActionBg"
-    )
+    val bgColor = when {
+        isFocused -> Color.White
+        isPrimary -> Color(0x38FFFFFF)
+        else -> AbyssPillGlass
+    }
     val contentColor = when {
         isFocused -> Color(0xFF1E222B)
         isPrimary -> Color.White
@@ -386,33 +399,15 @@ fun SeriesActionPill(
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = if (isFocused) 1.05f else 1f
+                scaleX = s
+                scaleY = s
             }
             .clip(RoundedCornerShape(50))
             .background(bgColor)
             .onFocusChanged {
                 isFocused = it.isFocused
                 if (it.isFocused) onFocused?.invoke()
-            }
-            .onPreviewKeyEvent { event ->
-                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                    when (event.nativeKeyEvent.keyCode) {
-                        KeyEvent.KEYCODE_DPAD_UP -> {
-                            if (onNavigateUp != null) {
-                                onNavigateUp.invoke()
-                                true
-                            } else false
-                        }
-                        KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            if (onNavigateDown != null) {
-                                onNavigateDown.invoke()
-                                true
-                            } else false
-                        }
-                        else -> false
-                    }
-                } else false
             }
             .clickable { onClick() }
             .padding(horizontal = 18.dp, vertical = 9.dp),

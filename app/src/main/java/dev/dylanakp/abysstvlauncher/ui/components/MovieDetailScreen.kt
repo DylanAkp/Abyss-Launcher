@@ -38,6 +38,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
@@ -96,24 +97,16 @@ fun MovieDetailScreen(
         String.format(java.util.Locale.US, "%02d:%02d", min, sec)
     } else ""
 
-    LaunchedEffect(movieItem.id) {
-        delay(150L)
-        try {
-            playButtonRequester.requestFocus()
-        } catch (_: Exception) {}
-    }
+    RequestModalInitialFocus(playButtonRequester, movieItem.id)
 
+    var wasVersionMenuOpen by remember { mutableStateOf(false) }
+    RequestModalInitialFocus(
+        focusRequester = if (showVersionMenu) versionMenuFirstItemRequester else playButtonRequester,
+        showVersionMenu,
+        enabled = showVersionMenu || wasVersionMenuOpen
+    )
     LaunchedEffect(showVersionMenu) {
-        if (showVersionMenu) {
-            delay(100L)
-            try {
-                versionMenuFirstItemRequester.requestFocus()
-            } catch (_: Exception) {}
-        } else {
-            try {
-                playButtonRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
+        wasVersionMenuOpen = showVersionMenu
     }
 
     Box(
@@ -344,13 +337,14 @@ fun MovieDetailScreen(
 
         // 3. VERSION PICKER MODAL
         if (showVersionMenu && versions.size > 1) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xD9000000))
-                    .clickable { showVersionMenu = false },
-                contentAlignment = Alignment.Center
+            AbyssModalOverlay(
+                scrimColor = Color(0xD9000000),
+                onDismiss = { showVersionMenu = false }
             ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(0.55f)
@@ -384,7 +378,11 @@ fun MovieDetailScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            itemsIndexed(versions) { index, ver ->
+                            itemsIndexed(
+                                items = versions,
+                                key = { _, ver -> ver.id },
+                                contentType = { _, _ -> "version_card" }
+                            ) { index, ver ->
                                 val isSelected = ver.id == selectedVersion?.id
                                 VersionSelectionCard(
                                     version = ver,
@@ -400,6 +398,7 @@ fun MovieDetailScreen(
                     }
                 }
             }
+        }
         }
     }
 }
@@ -439,7 +438,11 @@ private fun VersionSelectionCard(
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .fillMaxWidth()
-            .scale(if (isFocused) 1.02f else 1f)
+            .graphicsLayer {
+                val s = if (isFocused) 1.02f else 1f
+                scaleX = s
+                scaleY = s
+            }
             .clip(RoundedCornerShape(12.dp))
             .background(
                 when {
@@ -533,7 +536,11 @@ private fun MovieActionButton(
     Box(
         modifier = modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .scale(if (isFocused) 1.05f else 1f)
+            .graphicsLayer {
+                val s = if (isFocused) 1.05f else 1f
+                scaleX = s
+                scaleY = s
+            }
             .clip(shape)
             .background(bgColor)
             .onFocusChanged { isFocused = it.isFocused }
