@@ -10,13 +10,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.appcompat.app.AppCompatDelegate
@@ -32,6 +36,7 @@ import dev.dylanakp.abysstvlauncher.remote.RemoteBridgeService
 import dev.dylanakp.abysstvlauncher.remote.TvCommandController
 import dev.dylanakp.abysstvlauncher.theme.AbyssTVLauncherTheme
 import dev.dylanakp.abysstvlauncher.ui.LauncherViewModel
+import dev.dylanakp.abysstvlauncher.ui.components.JellyfinMessageOverlay
 import dev.dylanakp.abysstvlauncher.ui.main.MainScreen
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
@@ -119,7 +124,16 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        MainScreen(viewModel = viewModel)
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            MainScreen(viewModel = viewModel)
+                            JellyfinMessageOverlay(
+                                message = uiState.jellyfinDisplayMessage,
+                                onDismiss = { viewModel.dismissJellyfinDisplayMessage() },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 28.dp, end = 36.dp)
+                            )
+                        }
                     }
                 }
             }
