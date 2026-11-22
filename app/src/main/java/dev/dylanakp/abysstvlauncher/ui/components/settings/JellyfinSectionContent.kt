@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.model.JellyfinConfig
 import dev.dylanakp.abysstvlauncher.model.PlayerPreference
+import dev.dylanakp.abysstvlauncher.model.TrackPreference
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
@@ -39,9 +40,11 @@ import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
 @Composable
 fun JellyfinSectionContent(
     config: JellyfinConfig,
+    trackPreference: TrackPreference,
     isSyncing: Boolean,
     onSaveAndConnect: (String, String, String) -> Unit,
-    onSelectPlayerPreference: (PlayerPreference) -> Unit
+    onSelectPlayerPreference: (PlayerPreference) -> Unit,
+    onOpenTrackPicker: (TrackPickerKind) -> Unit
 ) {
     var serverUrl by remember(config.serverUrl) { mutableStateOf(config.serverUrl) }
     var username by remember(config.username) { mutableStateOf(config.username) }
@@ -150,6 +153,28 @@ fun JellyfinSectionContent(
                     icon = AbyssIconType.SETTINGS,
                     isSelected = config.playerPreference == PlayerPreference.SYSTEM_CHOOSER,
                     onClick = { onSelectPlayerPreference(PlayerPreference.SYSTEM_CHOOSER) }
+                )
+            }
+        }
+
+        SettingsGroup(title = stringResource(R.string.section_track_prefs)) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SettingsPickerRow(
+                    title = stringResource(R.string.pref_audio_language_title),
+                    subtitle = stringResource(R.string.pref_audio_language_sub),
+                    icon = AbyssIconType.AUDIO_SPEAKER,
+                    valueLabel = trackLanguageLabel(trackPreference.audioChoice()),
+                    onClick = { onOpenTrackPicker(TrackPickerKind.AUDIO) }
+                )
+                SettingsPickerRow(
+                    title = stringResource(R.string.pref_subtitle_language_title),
+                    subtitle = stringResource(R.string.pref_subtitle_language_sub),
+                    icon = AbyssIconType.SUBTITLES_CC,
+                    valueLabel = trackLanguageLabel(trackPreference.subtitleChoice()),
+                    onClick = { onOpenTrackPicker(TrackPickerKind.SUBTITLE) }
                 )
             }
         }

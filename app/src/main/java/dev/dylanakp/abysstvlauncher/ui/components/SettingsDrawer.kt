@@ -61,6 +61,14 @@ import dev.dylanakp.abysstvlauncher.ui.components.settings.AppearanceSectionCont
 import dev.dylanakp.abysstvlauncher.ui.components.settings.JellyfinSectionContent
 import dev.dylanakp.abysstvlauncher.ui.components.settings.RemoteSectionContent
 import dev.dylanakp.abysstvlauncher.ui.components.settings.SeerSectionContent
+import dev.dylanakp.abysstvlauncher.ui.components.settings.SettingsTrackPicker
+import dev.dylanakp.abysstvlauncher.ui.components.settings.TRACK_AUDIO_OPTIONS
+import dev.dylanakp.abysstvlauncher.ui.components.settings.TRACK_SUBTITLE_OPTIONS
+import dev.dylanakp.abysstvlauncher.ui.components.settings.TrackPickerKind
+import dev.dylanakp.abysstvlauncher.ui.components.settings.audioChoice
+import dev.dylanakp.abysstvlauncher.ui.components.settings.subtitleChoice
+import dev.dylanakp.abysstvlauncher.ui.components.settings.withAudioChoice
+import dev.dylanakp.abysstvlauncher.ui.components.settings.withSubtitleChoice
 import dev.dylanakp.abysstvlauncher.ui.components.settings.SettingsGroup
 import dev.dylanakp.abysstvlauncher.data.WeatherInfo
 import dev.dylanakp.abysstvlauncher.model.AppLanguage
@@ -113,6 +121,11 @@ fun SettingsDrawer(
         exit = fadeOut(tween(150))
     ) {
         var activeSection by remember { mutableStateOf(SettingsSection.JELLYFIN) }
+        var trackPicker by remember { mutableStateOf<TrackPickerKind?>(null) }
+
+        LaunchedEffect(isOpen) {
+            if (!isOpen) trackPicker = null
+        }
 
         val navJfFocusRequester = remember { FocusRequester() }
         val navSeerFocusRequester = remember { FocusRequester() }
@@ -311,7 +324,7 @@ fun SettingsDrawer(
                                     isSyncing = isSyncing,
                                     onSaveAndConnect = onSaveAndConnectJellyfin,
                                     onSelectPlayerPreference = onSelectPlayerPreference,
-                                    onSelectTrackPreference = onSelectTrackPreference
+                                    onOpenTrackPicker = { trackPicker = it }
                                 )
                             }
                             SettingsSection.SEER -> {
@@ -340,6 +353,24 @@ fun SettingsDrawer(
                         }
                     }
                 }
+            }
+
+            trackPicker?.let { kind ->
+                SettingsTrackPicker(
+                    kind = kind,
+                    options = if (kind == TrackPickerKind.AUDIO) TRACK_AUDIO_OPTIONS else TRACK_SUBTITLE_OPTIONS,
+                    selected = if (kind == TrackPickerKind.AUDIO) trackPreference.audioChoice() else trackPreference.subtitleChoice(),
+                    onSelect = { choice ->
+                        onSelectTrackPreference(
+                            if (kind == TrackPickerKind.AUDIO) {
+                                trackPreference.withAudioChoice(choice)
+                            } else {
+                                trackPreference.withSubtitleChoice(choice)
+                            }
+                        )
+                    },
+                    onDismiss = { trackPicker = null }
+                )
             }
         }
     }

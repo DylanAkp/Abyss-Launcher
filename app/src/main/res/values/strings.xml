@@ -219,6 +219,7 @@
     <!-- Settings Section Titles -->
     <string name="section_connection">Connection</string>
     <string name="section_player_prefs">Playback &amp; Preferences</string>
+    <string name="section_track_prefs">Default Audio &amp; Subtitles</string>
     <string name="section_library_status">Library Sync Status</string>
     <string name="section_basics">Basics</string>
     <string name="section_app_drawer">App Drawer</string>
@@ -252,6 +253,15 @@
     <string name="player_external_subtitle">Delegates playback to VLC, JustPlayer, Nova or Vimu</string>
     <string name="player_always_ask_title">Always Ask</string>
     <string name="player_always_ask_subtitle">Shows the Android system app chooser dialog</string>
+
+    <!-- Default track preferences -->
+    <string name="pref_audio_language_title">Default audio language</string>
+    <string name="pref_audio_language_sub">Preferred audio track when playing a video</string>
+    <string name="pref_subtitle_language_title">Default subtitle language</string>
+    <string name="pref_subtitle_language_sub">Includes forced variants (e.g. Français - Forcé)</string>
+    <string name="track_lang_auto">Auto</string>
+    <string name="track_lang_off">Off</string>
+    <string name="track_lang_forced_format">%1$s (Forced)</string>
 
     <!-- Language & Weather Options -->
     <string name="lang_auto_subtitle">Matches your TV system language</string>

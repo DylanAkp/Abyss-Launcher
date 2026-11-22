@@ -45,11 +45,15 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.dylanakp.abysstvlauncher.R
+import dev.dylanakp.abysstvlauncher.model.TRACK_LANGUAGE_CODES
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
+import java.util.Locale
 
 @Composable
 fun SettingsGroup(
@@ -211,6 +215,7 @@ fun GoogleTvRadioRow(
     subtitle: String,
     icon: AbyssIconType? = null,
     isSelected: Boolean,
+    focusRequester: FocusRequester? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -224,6 +229,7 @@ fun GoogleTvRadioRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -426,3 +432,20 @@ fun GoogleTvSwitchRow(
         }
     }
 }
+
+val TRACK_AUDIO_OPTIONS = listOf("") + TRACK_LANGUAGE_CODES
+val TRACK_SUBTITLE_OPTIONS = listOf("", "off") + TRACK_LANGUAGE_CODES.flatMap { listOf(it, "$it!") }
+
+@Composable
+fun trackLanguageLabel(code: String): String = when (code) {
+    "" -> stringResource(R.string.track_lang_auto)
+    "off" -> stringResource(R.string.track_lang_off)
+    else -> {
+        val base = code.removeSuffix("!")
+        val name = Locale.forLanguageTag(base).getDisplayLanguage(Locale.getDefault())
+            .ifBlank { base }
+            .replaceFirstChar { it.uppercase() }
+        if (code.endsWith("!")) stringResource(R.string.track_lang_forced_format, name) else name
+    }
+}
+

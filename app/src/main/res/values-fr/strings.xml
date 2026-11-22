@@ -219,6 +219,7 @@
     <!-- Titres de section Paramètres -->
     <string name="section_connection">Connexion</string>
     <string name="section_player_prefs">Lecture &amp; Préférences</string>
+    <string name="section_track_prefs">Audio et sous-titres par défaut</string>
     <string name="section_library_status">État de la synchronisation</string>
     <string name="section_basics">Général</string>
     <string name="section_app_drawer">Tiroir d\'applications</string>
@@ -252,6 +253,15 @@
     <string name="player_external_subtitle">Délègue la lecture vidéo à VLC, JustPlayer, Nova ou Vimu</string>
     <string name="player_always_ask_title">Toujours demander</string>
     <string name="player_always_ask_subtitle">Affiche la boîte de sélection d\'application Android</string>
+
+    <!-- Préférences de pistes par défaut -->
+    <string name="pref_audio_language_title">Langue audio par défaut</string>
+    <string name="pref_audio_language_sub">Piste audio préférée lors de la lecture</string>
+    <string name="pref_subtitle_language_title">Langue des sous-titres par défaut</string>
+    <string name="pref_subtitle_language_sub">Inclut les variantes forcées (ex. Français - Forcé)</string>
+    <string name="track_lang_auto">Auto</string>
+    <string name="track_lang_off">Désactivé</string>
+    <string name="track_lang_forced_format">%1$s (Forcé)</string>
 
     <!-- Options Langue & Météo -->
     <string name="lang_auto_subtitle">Suit automatiquement la langue de votre système TV</string>
