@@ -4,7 +4,6 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Transaction
 
 @Dao
 interface MediaLibraryDao {
@@ -24,7 +23,6 @@ interface MediaLibraryDao {
     @Query("DELETE FROM cached_media_items")
     suspend fun clearAll()
 
-    @Transaction
     suspend fun replaceSection(section: String, items: List<MediaItemEntity>) {
         deleteSection(section)
         if (items.isNotEmpty()) {

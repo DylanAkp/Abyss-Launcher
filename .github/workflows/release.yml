@@ -73,9 +73,12 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "SIGNING_KEYSTORE_BASE64 secret is required for release builds" >&2
+            exit 1
           fi
+          echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+          test -s release.jks
 
       - name: Build Release APK
         env:

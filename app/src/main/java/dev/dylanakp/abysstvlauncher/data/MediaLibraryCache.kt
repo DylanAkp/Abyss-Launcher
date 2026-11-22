@@ -29,7 +29,10 @@ object MediaLibraryCache : IMediaLibraryCache, KoinComponent {
     }
 
     override suspend fun save(context: Context?, library: SyncedLibrary) = withContext(Dispatchers.IO) {
-        if (library.movies.isEmpty() && library.series.isEmpty() && library.tmdbTrending.isEmpty() && library.seerTrending.isEmpty()) {
+        if (library.movies.isEmpty() && library.series.isEmpty() && library.tmdbTrending.isEmpty() &&
+            library.seerTrending.isEmpty() && library.seerPopularMovies.isEmpty() &&
+            library.seerPopularTv.isEmpty() && library.seerRequests.isEmpty()
+        ) {
             return@withContext
         }
 
@@ -61,7 +64,9 @@ object MediaLibraryCache : IMediaLibraryCache, KoinComponent {
         val seerPopularTv = bySection["seerPopularTv"].orEmpty().map { it.toDomain() }
         val seerRequests = bySection["seerRequests"].orEmpty().map { it.toDomain() }
 
-        if (movies.isEmpty() && series.isEmpty() && tmdbTrending.isEmpty() && seerTrending.isEmpty()) {
+        if (movies.isEmpty() && series.isEmpty() && tmdbTrending.isEmpty() && seerTrending.isEmpty() &&
+            seerPopularMovies.isEmpty() && seerPopularTv.isEmpty() && seerRequests.isEmpty()
+        ) {
             null
         } else {
             SyncedLibrary(

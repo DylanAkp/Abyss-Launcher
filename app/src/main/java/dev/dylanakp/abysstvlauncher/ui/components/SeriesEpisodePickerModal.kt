@@ -140,7 +140,7 @@ internal fun resolveSeriesResumeTarget(
             return if (progress >= 0.95f) {
                 val idx = allEps.indexOfFirst { it.id == matched.id }
                 val nextEp = allEps.drop(idx + 1).firstOrNull { resolveEpisodeProgress(it, playbackHistory) < 0.95f }
-                    ?: allEps.firstOrNull { resolveEpisodeProgress(it, playbackHistory) < 0.95f }
+                    ?: allEps.lastOrNull()
                     ?: matched
                 Triple(nextEp, resolveEpisodeSavedPosition(nextEp, playbackHistory), true)
             } else {

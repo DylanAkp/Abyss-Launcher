@@ -14,13 +14,23 @@
 
 - **Modern TV Design**: Grouped container cards, ice-blue focus states, smooth D-pad navigation, and Google TV style sidebar drawer.
 - **NVIDIA Shield TV Shortcut**: Dedicated shortcut button to trigger the Shield Remote Locator directly from top navigation.
-- **Built-in Web Remote**: Self-hosted local web remote (port `5400`, mDNS `abyss-tv.local`) with QR code pairing in Settings, multi-phone support, Material 3 Expressive D-pad/touchpad, live Now Playing controls, app launcher, and Shield remote ring.
+- **Built-in Web Remote**: Optional self-hosted LAN web remote (port `5400`, mDNS `abyss-tv.local`) with QR code pairing in Settings, multi-phone support, Material 3 Expressive D-pad/touchpad, live Now Playing controls, app launcher, and Shield remote ring. Off by default; see [Web Remote Trust Model](#-web-remote-trust-model).
 - **Native Jellyfin Client**: Resume watchlist, Next Up episode tracking, instant ExoPlayer playback, and watch status sync.
 - **Jellyseerr / Overseerr Discovery**: Browse trending media, monitor active downloads, and send media requests directly from your TV.
 - **Built-in Media3 Player**: Full 10-foot player with audio and subtitle tracks selectors, plus rapid D-pad seek accumulation.
 - **App Drawer & Customization**: Pin, reorder, or hide installed apps with a simple long-press context menu.
 - **Native Localization**: French and English localization using standard Android resources and system locales.
 - **Zero Ads & Zero Telemetry**: Clean interface without sponsored banners or background bloatware.
+
+## 🔒 Web Remote Trust Model
+
+The web remote is **off by default** and starts only after you explicitly enable it in Settings. When enabled:
+
+- It binds on port `5400` and is intended for **LAN-only** use — never port-forward it to the internet.
+- Access requires the **PIN** shown in Settings plus a one-time QR pairing per device.
+- Anyone on the same LAN who knows the PIN can control the TV (playback, volume, app launching, remote ring). Treat the PIN like a password.
+
+Disable it again in Settings when no longer needed.
 
 ---
 

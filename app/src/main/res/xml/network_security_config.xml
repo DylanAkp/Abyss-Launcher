@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Permit cleartext traffic for local home servers (Jellyfin/Seer on LAN) -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">themoviedb.org</domain>
+        <domain includeSubdomains="true">github.com</domain>
+        <domain includeSubdomains="true">githubusercontent.com</domain>
+        <domain includeSubdomains="true">open-meteo.com</domain>
+        <domain includeSubdomains="true">youtube.com</domain>
+        <domain includeSubdomains="true">jellyfin.org</domain>
+        <domain includeSubdomains="true">jellyseerr.com</domain>
+    </domain-config>
 </network-security-config>

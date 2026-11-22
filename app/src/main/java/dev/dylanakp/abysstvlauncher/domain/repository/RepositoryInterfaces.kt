@@ -83,12 +83,12 @@ interface MediaLibraryCache {
 
 interface PlaybackHistoryRepository {
     fun ensureLoaded(context: Context? = null)
-    fun getProgressPercent(itemId: String): Float
-    fun getSavedPositionMs(itemId: String): Long
-    fun getSavedDurationMs(itemId: String): Long
-    fun getEntry(context: Context, itemId: String): PlaybackHistoryEntry?
-    fun getAllEntries(context: Context): Map<String, PlaybackHistoryEntry>
-    fun saveProgress(
+    suspend fun getProgressPercent(itemId: String): Float
+    suspend fun getSavedPositionMs(itemId: String): Long
+    suspend fun getSavedDurationMs(itemId: String): Long
+    suspend fun getEntry(context: Context, itemId: String): PlaybackHistoryEntry?
+    suspend fun getAllEntries(context: Context): Map<String, PlaybackHistoryEntry>
+    suspend fun saveProgress(
         context: Context,
         itemId: String,
         positionMs: Long,
@@ -103,5 +103,5 @@ interface PlaybackHistoryRepository {
         backdropUrl: String = "",
         category: String = ""
     )
-    fun clearEntry(context: Context, itemId: String)
+    suspend fun clearEntry(context: Context, itemId: String)
 }

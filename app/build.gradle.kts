@@ -5,6 +5,10 @@ plugins {
   alias(libs.plugins.ksp)
 }
 
+ksp {
+  arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 val envFile = rootProject.file(".env")
 val envProps = mutableMapOf<String, String>()
 if (envFile.exists()) {
@@ -37,15 +41,24 @@ android {
         buildConfigField("String", "TMDB_API_KEY", "\"${escapeString(envProps["TMDB_API_KEY"] ?: "")}\"")
     }
 
+    val releaseKeystore = rootProject.file("release.jks")
+    val releaseRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+    if (releaseRequested) {
+        val missing = buildList {
+            if (!releaseKeystore.exists()) add("release.jks")
+            if (System.getenv("KEYSTORE_PASSWORD").isNullOrBlank()) add("KEYSTORE_PASSWORD")
+            if (System.getenv("KEY_ALIAS").isNullOrBlank()) add("KEY_ALIAS")
+            if (System.getenv("KEY_PASSWORD").isNullOrBlank()) add("KEY_PASSWORD")
+        }
+        if (missing.isNotEmpty()) throw GradleException("Release signing requires: ${missing.joinToString(", ")}")
+    }
+
     signingConfigs {
         create("release") {
-            val ksFile = rootProject.file("release.jks")
-            if (ksFile.exists()) {
-                storeFile = ksFile
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-                keyAlias = System.getenv("KEY_ALIAS") ?: ""
-                keyPassword = System.getenv("KEY_PASSWORD") ?: ""
-            }
+            storeFile = releaseKeystore
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias = System.getenv("KEY_ALIAS") ?: ""
+            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
         }
     }
 
@@ -65,8 +78,7 @@ android {
             buildConfigField("String", "DEFAULT_SEER_API_KEY", "\"\"")
             isMinifyEnabled = true
             isShrinkResources = true
-            val ksFile = rootProject.file("release.jks")
-            signingConfig = if (ksFile.exists()) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

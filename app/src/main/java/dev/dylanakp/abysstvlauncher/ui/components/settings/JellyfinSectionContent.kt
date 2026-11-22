@@ -48,9 +48,9 @@ fun JellyfinSectionContent(
     audioRowRequester: FocusRequester? = null,
     subtitleRowRequester: FocusRequester? = null
 ) {
-    var serverUrl by remember(config.serverUrl) { mutableStateOf(config.serverUrl) }
-    var username by remember(config.username) { mutableStateOf(config.username) }
-    var password by remember(config.password) { mutableStateOf(config.password) }
+    var serverUrl by remember { mutableStateOf(config.serverUrl) }
+    var username by remember { mutableStateOf(config.username) }
+    var password by remember { mutableStateOf(config.password) }
     val connectButtonFocusRequester = remember { FocusRequester() }
     val scrollState = rememberScrollState()
 

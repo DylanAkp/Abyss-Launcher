@@ -1,6 +1,7 @@
 package dev.dylanakp.abysstvlauncher.data
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.SharedPreferencesMigration
 import androidx.datastore.preferences.core.Preferences
@@ -20,13 +21,20 @@ import dev.dylanakp.abysstvlauncher.model.PlayerPreference
 import dev.dylanakp.abysstvlauncher.model.SeerConfig
 import dev.dylanakp.abysstvlauncher.model.TemperatureUnit
 import dev.dylanakp.abysstvlauncher.model.TrackPreference
+import dev.dylanakp.abysstvlauncher.remote.RemotePairingAndKeyHelper
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.IOException
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 
 val Context.launcherDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "abyss_tv_prefs",
@@ -39,11 +47,13 @@ class LauncherPreferences(private val context: Context) {
 
     private val dataStore = context.applicationContext.launcherDataStore
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val memoryPrefs = java.util.concurrent.atomic.AtomicReference<Preferences>(emptyPreferences())
-    private val loadComplete = kotlinx.coroutines.CompletableDeferred<Unit>()
-    private val writeChannel = kotlinx.coroutines.channels.Channel<(androidx.datastore.preferences.core.MutablePreferences) -> Unit>(
-        kotlinx.coroutines.channels.Channel.UNLIMITED
-    )
+    private val memoryPrefs = AtomicReference<Preferences>(emptyPreferences())
+    private val loadComplete = CompletableDeferred<Unit>()
+    private val writeMutex = Mutex()
+    private val identityMutex = Mutex()
+    private val writeLock = Any()
+    private var writesInFlight = 0
+    private var idleSignal: CompletableDeferred<Unit>? = null
 
     val dataFlow: Flow<Preferences> = dataStore.data
         .catch { exception ->
@@ -57,7 +67,6 @@ class LauncherPreferences(private val context: Context) {
     init {
         scope.launch {
             try {
-                migrateLegacyPrefsIfNeeded()
                 dataFlow.collect { prefs ->
                     memoryPrefs.set(prefs)
                     loadComplete.complete(Unit)
@@ -67,9 +76,9 @@ class LauncherPreferences(private val context: Context) {
             }
         }
         scope.launch {
-            for (mutation in writeChannel) {
-                dataStore.edit { mutation(it) }
-            }
+            awaitLoaded()
+            getOrCreateDeviceId()
+            getOrCreateRemotePairingPin()
         }
     }
 
@@ -77,48 +86,95 @@ class LauncherPreferences(private val context: Context) {
         loadComplete.await()
     }
 
-    private suspend fun migrateLegacyPrefsIfNeeded() {
-        val legacyPrefs = context.applicationContext.getSharedPreferences("abyss_tv_prefs", Context.MODE_PRIVATE)
-        if (legacyPrefs.all.isEmpty()) return
-
-        dataStore.edit { mut ->
-            if (mut.asMap().isNotEmpty()) return@edit
-            legacyPrefs.getString("language", null)?.let { mut[KEY_LANGUAGE] = it }
-            legacyPrefs.getString("accent_preset", null)?.let { mut[KEY_ACCENT_PRESET] = it }
-            if (legacyPrefs.contains("auto_rotate_hero")) mut[KEY_AUTO_ROTATE_HERO] = legacyPrefs.getBoolean("auto_rotate_hero", true)
-            if (legacyPrefs.contains("show_hidden_apps")) mut[KEY_SHOW_HIDDEN_APPS] = legacyPrefs.getBoolean("show_hidden_apps", false)
-            legacyPrefs.getString("jf_server", null)?.let { mut[KEY_JF_SERVER] = it }
-            legacyPrefs.getString("jf_user", null)?.let { mut[KEY_JF_USER] = it }
-            legacyPrefs.getString("jf_user_id", null)?.let { mut[KEY_JF_USER_ID] = it }
-            legacyPrefs.getString("jf_token", null)?.let { mut[KEY_JF_TOKEN] = SecureTokenStorage.encrypt(it) }
-            legacyPrefs.getString("jf_server_name", null)?.let { mut[KEY_JF_SERVER_NAME] = it }
-            legacyPrefs.getString("jf_player_pref", null)?.let { mut[KEY_JF_PLAYER_PREF] = it }
-            if (legacyPrefs.contains("jf_last_sync")) mut[KEY_JF_LAST_SYNC] = legacyPrefs.getLong("jf_last_sync", 0L)
-            if (legacyPrefs.contains("jf_movies_count")) mut[KEY_JF_MOVIES_COUNT] = legacyPrefs.getInt("jf_movies_count", 0)
-            if (legacyPrefs.contains("jf_series_count")) mut[KEY_JF_SERIES_COUNT] = legacyPrefs.getInt("jf_series_count", 0)
-            legacyPrefs.getString("seer_server", null)?.let { mut[KEY_SEER_SERVER] = it }
-            legacyPrefs.getString("seer_key", null)?.let { mut[KEY_SEER_KEY] = SecureTokenStorage.encrypt(it) }
-            if (legacyPrefs.contains("seer_last_sync")) mut[KEY_SEER_LAST_SYNC] = legacyPrefs.getLong("seer_last_sync", 0L)
-            if (legacyPrefs.contains("seer_req_count")) mut[KEY_SEER_REQ_COUNT] = legacyPrefs.getInt("seer_req_count", 0)
-            legacyPrefs.getString("pinned_packages", null)?.let { mut[KEY_PINNED_PACKAGES] = it }
-            legacyPrefs.getStringSet("hidden_packages", null)?.let { mut[KEY_HIDDEN_PACKAGES] = it }
-            legacyPrefs.getStringSet("watchlist_ids", null)?.let { mut[KEY_WATCHLIST_IDS] = it }
-            legacyPrefs.getString("weather_city", null)?.let { mut[KEY_WEATHER_CITY] = it }
-            legacyPrefs.getString("temp_unit", null)?.let { mut[KEY_TEMP_UNIT] = it }
-            legacyPrefs.getString("search_history", null)?.let { mut[KEY_SEARCH_HISTORY] = it }
+    suspend fun awaitWrites() {
+        val signal = synchronized(writeLock) {
+            if (writesInFlight == 0) null
+            else idleSignal ?: CompletableDeferred<Unit>().also { idleSignal = it }
         }
-        legacyPrefs.edit().clear().apply()
+        signal?.await()
+        memoryPrefs.set(dataFlow.first())
+    }
+
+    private fun mutate(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
+        synchronized(writeLock) {
+            writesInFlight++
+            if (idleSignal == null) idleSignal = CompletableDeferred()
+        }
+        scope.launch {
+            try {
+                writeMutex.withLock {
+                    dataStore.edit { block(it) }
+                }
+            } catch (e: Exception) {
+                Log.e("LauncherPreferences", "Failed to persist preference write", e)
+            } finally {
+                synchronized(writeLock) {
+                    writesInFlight--
+                    if (writesInFlight == 0) {
+                        idleSignal?.complete(Unit)
+                        idleSignal = null
+                    }
+                }
+            }
+        }
+    }
+
+    private fun encryptForStorage(plain: String): String =
+        try {
+            SecureTokenStorage.encryptOrThrow(plain)
+        } catch (e: TokenStorageException) {
+            Log.e("LauncherPreferences", "Failed to encrypt token for storage", e)
+            ""
+        }
+
+    private fun readSecret(stored: String?, onPlaintext: (String) -> Unit): String {
+        if (stored.isNullOrBlank()) return ""
+        if (!SecureTokenStorage.isEncrypted(stored)) {
+            onPlaintext(stored)
+            return stored
+        }
+        return try {
+            SecureTokenStorage.decryptOrThrow(stored)
+        } catch (e: TokenStorageException) {
+            Log.e("LauncherPreferences", "Failed to decrypt stored token", e)
+            ""
+        }
     }
 
     private inline fun <T> read(crossinline block: (Preferences) -> T): T {
         return block(memoryPrefs.get())
     }
 
-    private fun mutate(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
-        memoryPrefs.updateAndGet { current ->
-            current.toMutablePreferences().apply(block).toPreferences()
+    suspend fun getOrCreateDeviceId(): String {
+        awaitLoaded()
+        return identityMutex.withLock {
+            val existing = dataFlow.first()[KEY_DEVICE_ID]?.takeIf { it.isNotBlank() }
+            if (existing != null) {
+                existing
+            } else {
+                val generated = UUID.randomUUID().toString()
+                mutate { it[KEY_DEVICE_ID] = generated }
+                awaitWrites()
+                generated
+            }
         }
-        writeChannel.trySend(block)
+    }
+
+    suspend fun getOrCreateRemotePairingPin(): String {
+        awaitLoaded()
+        return identityMutex.withLock {
+            val existing = readSecret(dataFlow.first()[KEY_REMOTE_PIN]) { migrated ->
+                mutate { it[KEY_REMOTE_PIN] = encryptForStorage(migrated) }
+            }
+            if (existing.length == 6) {
+                existing
+            } else {
+                val generated = RemotePairingAndKeyHelper.generatePin()
+                mutate { it[KEY_REMOTE_PIN] = encryptForStorage(generated) }
+                awaitWrites()
+                generated
+            }
+        }
     }
 
     var language: AppLanguage
@@ -149,13 +205,17 @@ class LauncherPreferences(private val context: Context) {
             val defaultPass = BuildConfig.DEFAULT_JELLYFIN_PASS
             val srv = prefs[KEY_JF_SERVER]?.ifBlank { null } ?: defaultSrv
             val user = prefs[KEY_JF_USER]?.ifBlank { null } ?: defaultUser
-
+            val storedPass = readSecret(prefs[KEY_JF_PASS]) { migrated ->
+                mutate { it[KEY_JF_PASS] = encryptForStorage(migrated) }
+            }
             JellyfinConfig(
                 serverUrl = srv,
                 username = user,
-                password = defaultPass,
+                password = storedPass.ifBlank { defaultPass },
                 userId = prefs[KEY_JF_USER_ID] ?: "",
-                accessToken = SecureTokenStorage.decrypt(prefs[KEY_JF_TOKEN] ?: ""),
+                accessToken = readSecret(prefs[KEY_JF_TOKEN]) { migrated ->
+                    mutate { it[KEY_JF_TOKEN] = encryptForStorage(migrated) }
+                },
                 serverName = prefs[KEY_JF_SERVER_NAME] ?: "Jellyfin",
                 playerPreference = PlayerPreference.fromId(
                     prefs[KEY_JF_PLAYER_PREF] ?: PlayerPreference.ABYSS_INTERNAL.id
@@ -168,9 +228,9 @@ class LauncherPreferences(private val context: Context) {
         set(value) = mutate { prefs ->
             prefs[KEY_JF_SERVER] = value.serverUrl
             prefs[KEY_JF_USER] = value.username
-            prefs.remove(KEY_JF_PASS)
+            prefs[KEY_JF_PASS] = encryptForStorage(value.password)
             prefs[KEY_JF_USER_ID] = value.userId
-            prefs[KEY_JF_TOKEN] = SecureTokenStorage.encrypt(value.accessToken)
+            prefs[KEY_JF_TOKEN] = encryptForStorage(value.accessToken)
             prefs[KEY_JF_SERVER_NAME] = value.serverName
             prefs[KEY_JF_PLAYER_PREF] = value.playerPreference.id
             prefs[KEY_JF_LAST_SYNC] = value.lastSyncTimestamp
@@ -195,7 +255,9 @@ class LauncherPreferences(private val context: Context) {
             val defaultSrv = BuildConfig.DEFAULT_SEER_SERVER
             val defaultKey = BuildConfig.DEFAULT_SEER_API_KEY
             val srv = prefs[KEY_SEER_SERVER]?.ifBlank { null } ?: defaultSrv
-            val key = SecureTokenStorage.decrypt(prefs[KEY_SEER_KEY] ?: "").ifBlank { null } ?: defaultKey
+            val key = readSecret(prefs[KEY_SEER_KEY]) { migrated ->
+                mutate { it[KEY_SEER_KEY] = encryptForStorage(migrated) }
+            }.ifBlank { null } ?: defaultKey
 
             SeerConfig(
                 serverUrl = srv,
@@ -206,7 +268,7 @@ class LauncherPreferences(private val context: Context) {
         }
         set(value) = mutate { prefs ->
             prefs[KEY_SEER_SERVER] = value.serverUrl
-            prefs[KEY_SEER_KEY] = SecureTokenStorage.encrypt(value.apiKey)
+            prefs[KEY_SEER_KEY] = encryptForStorage(value.apiKey)
             prefs[KEY_SEER_LAST_SYNC] = value.lastSyncTimestamp
             prefs[KEY_SEER_REQ_COUNT] = value.requestedCount
         }
@@ -259,31 +321,33 @@ class LauncherPreferences(private val context: Context) {
         }
 
     var remoteServerEnabled: Boolean
-        get() = read { prefs -> prefs[KEY_REMOTE_ENABLED] ?: true }
+        get() = read { prefs -> prefs[KEY_REMOTE_ENABLED] ?: false }
         set(value) = mutate { prefs -> prefs[KEY_REMOTE_ENABLED] = value }
 
     var remotePairingPin: String
         get() = read { prefs ->
-            prefs[KEY_REMOTE_PIN]?.takeIf { it.length == 6 } ?: run {
-                val generated = dev.dylanakp.abysstvlauncher.remote.RemotePairingAndKeyHelper.generatePin()
-                mutate { it[KEY_REMOTE_PIN] = generated }
-                generated
-            }
+            readSecret(prefs[KEY_REMOTE_PIN]) { migrated ->
+                mutate { it[KEY_REMOTE_PIN] = encryptForStorage(migrated) }
+            }.takeIf { it.length == 6 } ?: ""
         }
-        set(value) = mutate { prefs -> prefs[KEY_REMOTE_PIN] = value }
+        set(value) = mutate { prefs -> prefs[KEY_REMOTE_PIN] = encryptForStorage(value) }
 
     val deviceId: String
-        get() = read { prefs ->
-            prefs[KEY_DEVICE_ID]?.takeIf { it.isNotBlank() } ?: run {
-                val generated = java.util.UUID.randomUUID().toString()
-                mutate { it[KEY_DEVICE_ID] = generated }
-                generated
-            }
-        }
+        get() = read { prefs -> prefs[KEY_DEVICE_ID]?.takeIf { it.isNotBlank() } ?: "" }
 
     var remotePairedTokens: Set<String>
-        get() = read { prefs -> prefs[KEY_REMOTE_TOKENS] ?: emptySet() }
-        set(value) = mutate { prefs -> prefs[KEY_REMOTE_TOKENS] = value }
+        get() = read { prefs ->
+            prefs[KEY_REMOTE_TOKENS].orEmpty().map { token ->
+                readSecret(token) { migrated ->
+                    mutate { p ->
+                        p[KEY_REMOTE_TOKENS] = p[KEY_REMOTE_TOKENS].orEmpty() - token + migrated
+                    }
+                }
+            }.toSet()
+        }
+        set(value) = mutate { prefs ->
+            prefs[KEY_REMOTE_TOKENS] = value.mapNotNull { encryptForStorage(it).ifBlank { null } }.toSet()
+        }
 
     companion object {
         private val KEY_LANGUAGE = stringPreferencesKey("language")
