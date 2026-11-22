@@ -3,6 +3,7 @@ package dev.dylanakp.abysstvlauncher.data
 import dev.dylanakp.abysstvlauncher.model.JellyfinConfig
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -148,11 +149,13 @@ class JellyfinWebSocketClientTest {
         val httpUrl = JellyfinRepository.buildWebSocketUrl(
             JellyfinConfig(serverUrl = "http://192.168.1.10:8096/", accessToken = "tok123")
         )
-        assertTrue(httpUrl!!.startsWith("ws://192.168.1.10:8096/socket?api_key=tok123&deviceId="))
+        assertTrue(httpUrl!!.startsWith("ws://192.168.1.10:8096/socket?deviceId="))
+        assertFalse("api_key" in httpUrl)
 
         val httpsUrl = JellyfinRepository.buildWebSocketUrl(
             JellyfinConfig(serverUrl = "https://jf.example.com", accessToken = "tok123")
         )
-        assertTrue(httpsUrl!!.startsWith("wss://jf.example.com/socket?api_key=tok123&deviceId="))
+        assertTrue(httpsUrl!!.startsWith("wss://jf.example.com/socket?deviceId="))
+        assertFalse("api_key" in httpsUrl)
     }
 }

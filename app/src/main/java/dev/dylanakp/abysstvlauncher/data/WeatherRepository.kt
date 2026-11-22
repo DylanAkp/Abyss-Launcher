@@ -16,7 +16,6 @@ import okhttp3.Request
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 enum class WeatherIconType {
@@ -113,54 +112,62 @@ object WeatherRepository : IWeatherRepository, KoinComponent {
             if (cachedInfo != null && cachedCity.equals(cityName, ignoreCase = true) && (now - lastFetchTime < 30 * 60 * 1000L)) {
                 return@withContext cachedInfo
             }
-        }
 
-        try {
-            val encCity = URLEncoder.encode(cityName.trim().ifBlank { "Paris" }, "UTF-8")
-            val lang = java.util.Locale.getDefault().language.ifEmpty { "en" }
-            val geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=$encCity&count=1&language=$lang&format=json"
-            val geoReq = Request.Builder()
-                .url(geoUrl)
-                .header("User-Agent", "AbyssLauncher/2.0")
-                .build()
-            val geoBody = client.newCall(geoReq).execute().use { geoResp ->
-                if (!geoResp.isSuccessful) return@withContext cachedInfo
-                geoResp.body?.string() ?: return@withContext cachedInfo
+            val fresh = try {
+                fetchWeather(cityName)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("AbyssWeather", "Weather fetch error: ${e.message}")
+                null
             }
-            val geoData = json.decodeFromString<GeocodingResponse>(geoBody)
-            val first = geoData.results.firstOrNull() ?: return@withContext cachedInfo
 
-            val weatherUrl = "https://api.open-meteo.com/v1/forecast?latitude=${first.latitude}&longitude=${first.longitude}&current=temperature_2m,weather_code,is_day"
-            val weatherReq = Request.Builder()
-                .url(weatherUrl)
-                .header("User-Agent", "AbyssLauncher/2.0")
-                .build()
-            val weatherBody = client.newCall(weatherReq).execute().use { weatherResp ->
-                if (!weatherResp.isSuccessful) return@withContext cachedInfo
-                weatherResp.body?.string() ?: return@withContext cachedInfo
-            }
-            val weatherData = json.decodeFromString<WeatherResponse>(weatherBody)
-            val current = weatherData.current ?: return@withContext cachedInfo
-
-            val info = WeatherInfo(
-                temperatureC = current.temperature2m,
-                weatherCode = current.weatherCode,
-                isDay = current.isDay == 1,
-                iconEmoji = weatherCodeToEmoji(current.weatherCode),
-                cityName = first.name.ifBlank { cityName }
-            )
-            cacheMutex.withLock {
-                cachedInfo = info
-                cachedCity = cityName
+            if (fresh != null) {
+                cachedInfo = fresh
+                cachedCity = fresh.cityName
                 lastFetchTime = System.currentTimeMillis()
+                return@withContext fresh
             }
-            info
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.w("AbyssWeather", "Weather fetch error: ${e.message}")
-            cachedInfo
+
+            if (cachedCity.equals(cityName, ignoreCase = true)) cachedInfo else null
         }
+    }
+
+    private fun fetchWeather(cityName: String): WeatherInfo {
+        val query = cityName.trim().ifBlank { "Paris" }
+        val encCity = URLEncoder.encode(query, "UTF-8")
+        val lang = java.util.Locale.getDefault().language.ifEmpty { "en" }
+        val geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=$encCity&count=1&language=$lang&format=json"
+        val geoReq = Request.Builder()
+            .url(geoUrl)
+            .header("User-Agent", "AbyssLauncher/2.0")
+            .build()
+        val geoBody = client.newCall(geoReq).execute().use { geoResp ->
+            if (!geoResp.isSuccessful) error("Geocoding HTTP ${geoResp.code}")
+            geoResp.body?.string() ?: error("Empty geocoding response")
+        }
+        val first = json.decodeFromString<GeocodingResponse>(geoBody).results.firstOrNull()
+            ?: error("No geocoding result for $query")
+
+        val weatherUrl = "https://api.open-meteo.com/v1/forecast?latitude=${first.latitude}&longitude=${first.longitude}&current=temperature_2m,weather_code,is_day"
+        val weatherReq = Request.Builder()
+            .url(weatherUrl)
+            .header("User-Agent", "AbyssLauncher/2.0")
+            .build()
+        val weatherBody = client.newCall(weatherReq).execute().use { weatherResp ->
+            if (!weatherResp.isSuccessful) error("Forecast HTTP ${weatherResp.code}")
+            weatherResp.body?.string() ?: error("Empty forecast response")
+        }
+        val current = json.decodeFromString<WeatherResponse>(weatherBody).current
+            ?: error("Missing current weather")
+
+        return WeatherInfo(
+            temperatureC = current.temperature2m,
+            weatherCode = current.weatherCode,
+            isDay = current.isDay == 1,
+            iconEmoji = weatherCodeToEmoji(current.weatherCode),
+            cityName = first.name.ifBlank { query }
+        )
     }
 
     private fun weatherCodeToEmoji(code: Int): String = when (code) {

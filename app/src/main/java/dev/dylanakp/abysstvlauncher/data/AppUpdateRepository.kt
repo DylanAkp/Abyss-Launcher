@@ -26,6 +26,12 @@ data class AppUpdate(
     val apkSize: Long
 )
 
+sealed interface InstallResult {
+    object Success : InstallResult
+    object NeedsPermission : InstallResult
+    data class Failure(val error: Throwable) : InstallResult
+}
+
 @Serializable
 private data class GitHubReleaseDto(
     @SerialName("tag_name") val tagName: String = "",
@@ -40,11 +46,38 @@ private data class GitHubAssetDto(
     val size: Long = 0L
 )
 
+private data class SemVer(val core: List<Int>, val prerelease: List<String>) : Comparable<SemVer> {
+    override fun compareTo(other: SemVer): Int {
+        for (i in 0 until maxOf(core.size, other.core.size)) {
+            val diff = core.getOrElse(i) { 0 }.compareTo(other.core.getOrElse(i) { 0 })
+            if (diff != 0) return diff
+        }
+        if (prerelease.isEmpty() && other.prerelease.isEmpty()) return 0
+        if (prerelease.isEmpty()) return 1
+        if (other.prerelease.isEmpty()) return -1
+        for (i in 0 until minOf(prerelease.size, other.prerelease.size)) {
+            val a = prerelease[i]
+            val b = other.prerelease[i]
+            val aNum = a.toLongOrNull()
+            val bNum = b.toLongOrNull()
+            val diff = when {
+                aNum != null && bNum != null -> aNum.compareTo(bNum)
+                aNum != null -> -1
+                bNum != null -> 1
+                else -> a.compareTo(b)
+            }
+            if (diff != 0) return diff
+        }
+        return prerelease.size.compareTo(other.prerelease.size)
+    }
+}
+
 object AppUpdateRepository : KoinComponent {
 
     private const val REPO_OWNER = "DylanAkp"
     private const val REPO_NAME = "Abyss-Launcher"
     private const val LATEST_RELEASE_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
+    private val APK_ASSET_NAME = Regex("^Abyss-Launcher-.+\\.apk$", RegexOption.IGNORE_CASE)
 
     private val json: Json by inject()
     private val baseClient: OkHttpClient by inject()
@@ -65,6 +98,30 @@ object AppUpdateRepository : KoinComponent {
                 else -> 0
             }
         }.getOrDefault(0)
+    }
+
+    private fun parseSemVer(raw: String): SemVer? {
+        val clean = raw.trim().removePrefix("v").removePrefix("V")
+        val withoutBuild = clean.substringBefore("+")
+        val core = withoutBuild.substringBefore("-")
+        if (core.isBlank() || core.split(".").any { it.toIntOrNull() == null }) return null
+        val pre = withoutBuild.substringAfter("-", "")
+        return SemVer(
+            core = core.split(".").map { it.toInt() },
+            prerelease = if (pre.isBlank()) emptyList() else pre.split(".")
+        )
+    }
+
+    private fun isNewerThanInstalled(tag: String): Boolean {
+        val latest = parseSemVer(tag)
+        val current = parseSemVer(BuildConfig.VERSION_NAME)
+        if (latest != null && current != null) return latest > current
+
+        val latestCode = parseVersionCode(tag)
+        if (latestCode > 0 && BuildConfig.VERSION_CODE > 0) {
+            return latestCode > BuildConfig.VERSION_CODE
+        }
+        return tag.trim().removePrefix("v").removePrefix("V") != BuildConfig.VERSION_NAME
     }
 
     suspend fun checkLatestRelease(): Result<AppUpdate?> = withContext(Dispatchers.IO) {
@@ -90,24 +147,15 @@ object AppUpdateRepository : KoinComponent {
             if (tagName.isBlank()) return@runCatching null
 
             val cleanTag = tagName.removePrefix("v").removePrefix("V")
-            val latestVersionCode = parseVersionCode(cleanTag)
-            val currentVersionCode = BuildConfig.VERSION_CODE
+            if (!isNewerThanInstalled(tagName)) return@runCatching null
 
-            val isNewer = if (latestVersionCode > 0 && currentVersionCode > 0) {
-                latestVersionCode > currentVersionCode
-            } else {
-                cleanTag != BuildConfig.VERSION_NAME
-            }
-
-            if (!isNewer) return@runCatching null
-
-            val apkAsset = release.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
-                ?: return@runCatching null
-            if (apkAsset.downloadUrl.isBlank()) return@runCatching null
+            val apkAsset = release.assets.firstOrNull {
+                APK_ASSET_NAME.matches(it.name) && it.downloadUrl.isNotBlank()
+            } ?: return@runCatching null
 
             AppUpdate(
                 versionName = cleanTag,
-                versionCode = latestVersionCode,
+                versionCode = parseVersionCode(cleanTag),
                 releaseNotes = release.body.trim(),
                 apkUrl = apkAsset.downloadUrl,
                 apkSize = apkAsset.size
@@ -200,37 +248,40 @@ object AppUpdateRepository : KoinComponent {
         }
     }
 
-    fun triggerInstall(context: Context, apkFile: File): Result<Unit> {
-        return runCatching {
+    fun triggerInstall(context: Context, apkFile: File): InstallResult {
+        return try {
             if (!verifyApkSignature(context, apkFile)) {
                 apkFile.delete()
                 throw SecurityException("APK signature verification failed")
             }
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                if (!context.packageManager.canRequestPackageInstalls()) {
-                    val settingsIntent = Intent(
-                        android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                        android.net.Uri.parse("package:${context.packageName}")
-                    ).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    context.startActivity(settingsIntent)
-                    return@runCatching
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
+                !context.packageManager.canRequestPackageInstalls()
+            ) {
+                val settingsIntent = Intent(
+                    android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    android.net.Uri.parse("package:${context.packageName}")
+                ).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
+                context.startActivity(settingsIntent)
+                InstallResult.NeedsPermission
+            } else {
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    apkFile
+                )
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    clipData = android.content.ClipData.newRawUri("", uri)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(intent)
+                InstallResult.Success
             }
-
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                apkFile
-            )
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/vnd.android.package-archive")
-                clipData = android.content.ClipData.newRawUri("", uri)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(intent)
+        } catch (e: Exception) {
+            InstallResult.Failure(e)
         }
     }
 }

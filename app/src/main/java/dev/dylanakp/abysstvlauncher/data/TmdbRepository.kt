@@ -13,6 +13,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -28,6 +30,8 @@ import java.io.InputStreamReader
 import java.net.URL
 import java.text.Normalizer
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
 
 @Serializable
 private data class TmdbTvDetailsDto(
@@ -96,6 +100,18 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
     private const val IMG_W1280 = "https://image.tmdb.org/t/p/w1280"
     private const val IMG_W780 = "https://image.tmdb.org/t/p/w780"
 
+    private const val MAX_PARALLEL_SEASON_REQUESTS = 4
+    private val seasonRequestSemaphore = Semaphore(MAX_PARALLEL_SEASON_REQUESTS)
+    private val apiKeyWarningLogged = AtomicBoolean(false)
+
+    private fun hasApiKey(): Boolean {
+        if (API_KEY.isNotBlank()) return true
+        if (apiKeyWarningLogged.compareAndSet(false, true)) {
+            Log.e("TmdbRepository", "TMDB_API_KEY is missing; TMDB requests are disabled")
+        }
+        return false
+    }
+
     private val RE_DIACRITICS = Regex("\\p{InCombiningDiacriticalMarks}+")
     private val RE_ROMAN_II = Regex("\\bii\\b")
     private val RE_ROMAN_III = Regex("\\biii\\b")
@@ -141,6 +157,7 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
     }
 
     override suspend fun fetchTrending(): List<MediaItem> = withContext(Dispatchers.IO) {
+        if (!hasApiKey()) return@withContext emptyList()
         val lang = Locale.getDefault().toLanguageTag()
         val url = "$BASE_URL/trending/all/week?api_key=$API_KEY&language=$lang"
         val raw = httpGet(url) ?: return@withContext emptyList()
@@ -148,6 +165,7 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
     }
 
     override suspend fun fetchPopularMovies(): List<MediaItem> = withContext(Dispatchers.IO) {
+        if (!hasApiKey()) return@withContext emptyList()
         val lang = Locale.getDefault().toLanguageTag()
         val url = "$BASE_URL/movie/popular?api_key=$API_KEY&language=$lang&page=1"
         val raw = httpGet(url) ?: return@withContext emptyList()
@@ -155,10 +173,21 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
     }
 
     override suspend fun fetchPopularSeries(): List<MediaItem> = withContext(Dispatchers.IO) {
+        if (!hasApiKey()) return@withContext emptyList()
         val lang = Locale.getDefault().toLanguageTag()
         val url = "$BASE_URL/tv/popular?api_key=$API_KEY&language=$lang&page=1"
         val raw = httpGet(url) ?: return@withContext emptyList()
         parseTmdbResults(raw, forcedCategory = MediaCategory.SERIES)
+    }
+
+    private fun metadataAgrees(a: MediaItem, b: MediaItem): Boolean {
+        val aYear = a.year.take(4).toIntOrNull()
+        val bYear = b.year.take(4).toIntOrNull()
+        if (aYear != null && bYear != null && aYear != bYear) return false
+        val aRating = a.rating.toFloatOrNull()
+        val bRating = b.rating.toFloatOrNull()
+        if (aRating != null && bRating != null && abs(aRating - bRating) > 1.0f) return false
+        return true
     }
 
     private class PoolIndex(pool: List<MediaItem>) {
@@ -170,7 +199,7 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
         init {
             for (jf in pool) {
                 jf.tmdbId?.let { byTmdbId.putIfAbsent(it, jf) }
-                val clean = cleanTitleForMatching(jf.title)
+                val clean = TmdbRepository.cleanTitleForMatching(jf.title)
                 if (clean.isNotBlank()) {
                     byCleanTitle.putIfAbsent(clean, jf)
                     byCompactTitle.putIfAbsent(clean.replace(" ", ""), jf)
@@ -180,17 +209,17 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
         }
 
         fun findMatch(item: MediaItem): MediaItem? {
-            item.tmdbId?.let { id -> byTmdbId[id]?.let { return it } }
-            val clean = cleanTitleForMatching(item.title)
-            if (clean.isBlank()) return null
-            byCleanTitle[clean]?.let { return it }
-            byCompactTitle[clean.replace(" ", "")]?.let { return it }
-            for ((jfClean, jf) in cleanEntries) {
-                val shorter = if (clean.length <= jfClean.length) clean else jfClean
-                val longer = if (clean.length <= jfClean.length) jfClean else clean
-                if (shorter.length >= 6 && longer.startsWith("$shorter ")) return jf
+            val candidates = LinkedHashSet<MediaItem>()
+            item.tmdbId?.let { byTmdbId[it]?.let(candidates::add) }
+            val clean = TmdbRepository.cleanTitleForMatching(item.title)
+            if (clean.isNotBlank()) {
+                byCleanTitle[clean]?.let(candidates::add)
+                byCompactTitle[clean.replace(" ", "")]?.let(candidates::add)
+                for ((jfClean, jf) in cleanEntries) {
+                    if (TmdbRepository.titlesMatchSafely(jfClean, clean)) candidates.add(jf)
+                }
             }
-            return null
+            return candidates.firstOrNull { TmdbRepository.metadataAgrees(item, it) }
         }
     }
 
@@ -227,6 +256,7 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
         tmdbId: Int,
         seriesItem: MediaItem
     ): SeriesDetails? = withContext(Dispatchers.IO) {
+        if (!hasApiKey()) return@withContext null
         val lang = Locale.getDefault().toLanguageTag()
         val url = "$BASE_URL/tv/$tmdbId?api_key=$API_KEY&language=$lang"
         val raw = httpGet(url) ?: return@withContext null
@@ -242,7 +272,7 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
                             val epCount = sObj.episodeCount
 
                             val seasonUrl = "$BASE_URL/tv/$tmdbId/season/$seasonNum?api_key=$API_KEY&language=$lang"
-                            val seasonRaw = httpGet(seasonUrl)
+                            val seasonRaw = seasonRequestSemaphore.withPermit { httpGet(seasonUrl) }
                             val epList = mutableListOf<SeriesEpisode>()
                             if (seasonRaw != null) {
                                 val seasonRoot = json.decodeFromString<TmdbSeasonDetailDto>(seasonRaw)
@@ -349,8 +379,8 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
                         rating = rating,
                         year = year,
                         durationOrSeasons = "",
-                        qualityBadge = "4K HDR",
-                        audioBadge = "5.1",
+                        qualityBadge = "",
+                        audioBadge = "",
                         streamUrl = "",
                         posterUrl = posterUrl,
                         backdropUrl = backdropUrl
@@ -366,7 +396,7 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
     }
 
     override suspend fun fetchMovieTrailer(tmdbId: Int): Pair<String, String>? = withContext(Dispatchers.IO) {
-        if (API_KEY.isBlank() || tmdbId <= 0) return@withContext null
+        if (tmdbId <= 0 || !hasApiKey()) return@withContext null
         val lang = Locale.getDefault().toLanguageTag()
         val url = "$BASE_URL/movie/$tmdbId/videos?api_key=$API_KEY&language=$lang"
         val raw = httpGet(url) ?: httpGet("$BASE_URL/movie/$tmdbId/videos?api_key=$API_KEY&language=en-US") ?: return@withContext null
@@ -398,13 +428,6 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
             Log.w("TmdbRepository", "Invalid trailer payload for tmdbId=$tmdbId", e)
             null
         }
-    }
-
-    private fun normalizeForSearch(str: String): String {
-        val nfd = Normalizer.normalize(str, Normalizer.Form.NFD)
-        return nfd.replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
-            .lowercase(Locale.ROOT)
-            .replace(Regex("[^a-z0-9]"), "")
     }
 
     private fun httpGet(urlStr: String): String? {

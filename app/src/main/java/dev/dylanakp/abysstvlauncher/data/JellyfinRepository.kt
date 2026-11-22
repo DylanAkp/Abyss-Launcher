@@ -1,6 +1,9 @@
 package dev.dylanakp.abysstvlauncher.data
 
+import android.content.Context
+import android.net.Uri
 import android.util.Log
+import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.domain.repository.JellyfinRepository as IJellyfinRepository
 import dev.dylanakp.abysstvlauncher.model.JellyfinConfig
 import dev.dylanakp.abysstvlauncher.model.MediaCategory
@@ -22,7 +25,12 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromStream
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -50,7 +58,7 @@ private data class JellyfinItemDto(
     @SerialName("CommunityRating") val communityRating: Double? = null,
     @SerialName("RunTimeTicks") val runTimeTicks: Long? = null,
     @SerialName("Genres") val genres: List<String> = emptyList(),
-    @SerialName("Taglines") val taglines: List<String> = emptyList(),
+    @SerialName("Taglines") val taglines: JsonElement? = null,
     @SerialName("Tagline") val tagline: String? = null,
     @SerialName("OverviewTagline") val overviewTagline: String? = null,
     @SerialName("UserData") val userData: JellyfinUserDataDto? = null,
@@ -162,6 +170,26 @@ private data class JellyfinCapabilitiesPayload(
     @SerialName("SupportsPersistentIdentifier") val supportsPersistentIdentifier: Boolean = true
 )
 
+sealed interface LibrarySyncResult {
+    data class Success(val library: SyncedLibrary) : LibrarySyncResult
+    data class FetchFailed(val httpCode: Int?) : LibrarySyncResult
+    data class Failure(val error: Throwable) : LibrarySyncResult
+}
+
+class JellyfinLibraryFetchFailedException(val httpCode: Int?) :
+    IOException("Jellyfin library fetch failed (HTTP ${httpCode ?: "transport"})")
+
+private sealed interface JsonResult<out T> {
+    data class Ok<T>(val value: T) : JsonResult<T>
+    data class HttpError(val code: Int) : JsonResult<Nothing>
+    data object Error : JsonResult<Nothing>
+}
+
+private sealed interface FetchOutcome {
+    data class Ok(val items: List<MediaItem>) : FetchOutcome
+    data class Failed(val httpCode: Int?) : FetchOutcome
+}
+
 object JellyfinRepository : IJellyfinRepository, KoinComponent {
 
     private const val CLIENT_NAME = "AbyssLauncher"
@@ -170,50 +198,96 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
 
     private val client: OkHttpClient by inject()
     private val json: Json by inject()
+    private val prefs: LauncherPreferences by inject()
+    private val appContext: Context by inject()
+
+    @Volatile
+    private var cachedDeviceId: String? = null
 
     private fun resolveDeviceId(): String =
-        org.koin.core.context.GlobalContext.getOrNull()?.get<LauncherPreferences>()?.deviceId
+        cachedDeviceId?.takeIf { it.isNotBlank() }
+            ?: prefs.deviceId.takeIf { it.isNotBlank() }
             ?: "Abyss-TV-Player"
 
-    override fun cleanUrl(raw: String): String {
-        var u = raw.trim().trimEnd('/')
-        if (u.isNotBlank() && !u.startsWith("http://", ignoreCase = true) && !u.startsWith("https://", ignoreCase = true)) {
-            val is172Private = u.startsWith("172.") &&
-                u.substringAfter("172.").substringBefore(".").toIntOrNull()?.let { it in 16..31 } == true
-            val isLocal = u.startsWith("192.168.") || u.startsWith("10.") || is172Private || u.startsWith("localhost") || u.contains(":8096")
-            u = if (isLocal) "http://$u" else "https://$u"
-        }
-        return u
+    private suspend fun deviceId(): String {
+        cachedDeviceId?.takeIf { it.isNotBlank() }?.let { return it }
+        val id = prefs.getOrCreateDeviceId()
+        prefs.awaitWrites()
+        cachedDeviceId = id
+        return id
     }
 
-    private fun buildAuthHeader(token: String = ""): String {
-        val deviceId = resolveDeviceId()
-        return "MediaBrowser Client=\"$CLIENT_NAME\", Device=\"$DEVICE_NAME\", DeviceId=\"$deviceId\", Version=\"$CLIENT_VERSION\"" +
-                if (token.isNotBlank()) ", Token=\"$token\"" else ""
+    private fun resString(id: Int, vararg args: Any): String = appContext.getString(id, *args)
+
+    private fun isLocalHost(host: String): Boolean {
+        if (host.equals("localhost", ignoreCase = true)) return true
+        if (host.contains(":")) {
+            val h = host.lowercase(Locale.ROOT)
+            return h == "::1" || h == "0:0:0:0:0:0:0:1" ||
+                h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd")
+        }
+        val parts = host.split(".")
+        if (parts.size != 4) return false
+        val a = parts[0].toIntOrNull() ?: return false
+        val b = parts[1].toIntOrNull() ?: return false
+        return a == 10 || a == 127 || (a == 192 && b == 168) ||
+            (a == 172 && b in 16..31) || (a == 169 && b == 254) || (a == 0 && b == 0)
     }
+
+    override fun cleanUrl(raw: String): String {
+        val u = raw.trim().trimEnd('/')
+        if (u.isBlank()) return u
+
+        val hasScheme = u.contains("://")
+        val probe = Uri.parse(if (hasScheme) u else "http://$u")
+        val scheme = probe.scheme?.lowercase(Locale.ROOT)
+        if (hasScheme && (scheme == "http" || scheme == "https")) return u
+
+        val host = probe.host.orEmpty().ifBlank {
+            u.substringBefore("/").substringBefore("?").trim().trim('[', ']')
+        }
+        val isLocal = isLocalHost(host) || u.contains(":8096") || u.contains(":8920")
+        val resolved = if (isLocal) "http" else "https"
+        val withoutScheme = if (hasScheme) u.substringAfter("://") else u
+        return "$resolved://$withoutScheme"
+    }
+
+    private fun authHeader(deviceId: String, token: String): String =
+        "MediaBrowser Client=\"$CLIENT_NAME\", Device=\"$DEVICE_NAME\", DeviceId=\"$deviceId\", Version=\"$CLIENT_VERSION\"" +
+            if (token.isNotBlank()) ", Token=\"$token\"" else ""
+
+    private suspend fun buildAuthHeader(token: String = ""): String = authHeader(deviceId(), token)
 
     override fun getStreamUrl(config: JellyfinConfig, itemId: String, mediaSourceId: String?): String {
         val server = cleanUrl(config.serverUrl)
-        val userId = config.userId
         val params = buildList {
             add("static=true")
-            if (userId.isNotBlank()) add("userId=$userId")
-            if (!mediaSourceId.isNullOrBlank()) add("MediaSourceId=$mediaSourceId")
+            if (config.accessToken.isNotBlank()) add("api_key=${URLEncoder.encode(config.accessToken, "UTF-8")}")
+            if (config.userId.isNotBlank()) add("userId=${URLEncoder.encode(config.userId, "UTF-8")}")
+            if (!mediaSourceId.isNullOrBlank()) add("MediaSourceId=${URLEncoder.encode(mediaSourceId, "UTF-8")}")
         }.joinToString("&")
         return "$server/Videos/$itemId/stream?$params"
     }
 
     override fun sanitizeStreamUrl(streamUrl: String, config: JellyfinConfig, mediaSourceId: String?): String {
         if (streamUrl.isBlank()) return streamUrl
-        var url = streamUrl
-            .replace(Regex("([?&])api_key=[^&]*&?"), "$1")
-            .trimEnd('&', '?')
-        if (config.userId.isNotBlank() && !url.contains("userId=")) {
-            url = if (url.contains("?")) "$url&userId=${config.userId}" else "$url?userId=${config.userId}"
+        var url = streamUrl.trim()
+        fun appendParam(name: String, value: String) {
+            if (url.contains("$name=")) return
+            val enc = URLEncoder.encode(value, "UTF-8")
+            url += (if ("?" in url) "&" else "?") + "$name=$enc"
         }
-        if (!mediaSourceId.isNullOrBlank() && !url.contains("MediaSourceId=")) {
-            url = if (url.contains("?")) "$url&MediaSourceId=$mediaSourceId" else "$url?MediaSourceId=$mediaSourceId"
+        if (config.accessToken.isNotBlank()) {
+            val enc = URLEncoder.encode(config.accessToken, "UTF-8")
+            val apiKeyRegex = Regex("([?&])api_key=[^&]*")
+            url = if (apiKeyRegex.containsMatchIn(url)) {
+                apiKeyRegex.replace(url) { "${it.groupValues[1]}api_key=$enc" }
+            } else {
+                url + (if ("?" in url) "&" else "?") + "api_key=$enc"
+            }
         }
+        if (config.userId.isNotBlank()) appendParam("userId", config.userId)
+        if (!mediaSourceId.isNullOrBlank()) appendParam("MediaSourceId", mediaSourceId)
         return url
     }
 
@@ -318,7 +392,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         }
     }
 
-    private fun httpGet(urlStr: String, token: String): String? {
+    private suspend fun httpGet(urlStr: String, token: String): String? {
         return try {
             val reqBuilder = Request.Builder()
                 .url(urlStr)
@@ -345,7 +419,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
     }
 
     @OptIn(ExperimentalSerializationApi::class)
-    private inline fun <reified T> httpGetJson(urlStr: String, token: String): T? {
+    private suspend inline fun <reified T> fetchJson(urlStr: String, token: String): JsonResult<T> {
         return try {
             val reqBuilder = Request.Builder()
                 .url(urlStr)
@@ -359,23 +433,23 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
             }
 
             client.newCall(reqBuilder.build()).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                val body = resp.body ?: return null
-                json.decodeFromStream<T>(body.byteStream())
+                if (!resp.isSuccessful) return JsonResult.HttpError(resp.code)
+                val body = resp.body ?: return JsonResult.Error
+                JsonResult.Ok(json.decodeFromStream<T>(body.byteStream()))
             }
         } catch (e: IOException) {
             Log.w("AbyssJellyfin", "HTTP GET stream failed for ${urlStr.substringBefore("?")}", e)
-            null
+            JsonResult.Error
         } catch (e: SerializationException) {
             Log.w("AbyssJellyfin", "JSON stream decode failed for ${urlStr.substringBefore("?")}", e)
-            null
+            JsonResult.Error
         } catch (e: IllegalArgumentException) {
             Log.w("AbyssJellyfin", "Invalid URL in HTTP GET stream: ${urlStr.substringBefore("?")}", e)
-            null
+            JsonResult.Error
         }
     }
 
-    private fun httpPost(urlStr: String, token: String, bodyJson: String? = null): Boolean {
+    private suspend fun httpPost(urlStr: String, token: String, bodyJson: String? = null): Boolean {
         return try {
             val mediaType = "application/json; charset=utf-8".toMediaType()
             val reqBody = (bodyJson ?: "").toRequestBody(mediaType)
@@ -403,7 +477,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         }
     }
 
-    private fun httpDelete(urlStr: String, token: String): Boolean {
+    private suspend fun httpDelete(urlStr: String, token: String): Boolean {
         return try {
             val reqBuilder = Request.Builder()
                 .url(urlStr)
@@ -429,156 +503,186 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         }
     }
 
-    override suspend fun syncLibrary(config: JellyfinConfig): Result<SyncedLibrary> = withContext(Dispatchers.IO) {
-        val server = cleanUrl(config.serverUrl)
+    suspend fun syncLibraryDetailed(config: JellyfinConfig): LibrarySyncResult = withContext(Dispatchers.IO) {
         if (!config.isConfigured) {
-            return@withContext Result.failure(IllegalStateException("Jellyfin is not configured"))
+            return@withContext LibrarySyncResult.Failure(IllegalStateException("Jellyfin is not configured"))
         }
 
         try {
             coroutineScope {
-                val moviesDeferred = async { fetchMovies(config) }
-                val seriesDeferred = async { fetchSeries(config) }
+                val moviesDeferred = async { fetchMoviesOutcome(config) }
+                val seriesDeferred = async { fetchSeriesOutcome(config) }
 
                 val movies = moviesDeferred.await()
                 val series = seriesDeferred.await()
 
-                val library = SyncedLibrary(
-                    movies = movies,
-                    series = series
-                )
-                Result.success(library)
+                when {
+                    movies is FetchOutcome.Failed || series is FetchOutcome.Failed ->
+                        LibrarySyncResult.FetchFailed(
+                            (movies as? FetchOutcome.Failed)?.httpCode
+                                ?: (series as? FetchOutcome.Failed)?.httpCode
+                        )
+                    else -> LibrarySyncResult.Success(
+                        SyncedLibrary(
+                            movies = (movies as FetchOutcome.Ok).items,
+                            series = (series as FetchOutcome.Ok).items
+                        )
+                    )
+                }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w("AbyssJellyfin", "Jellyfin authentication failed", e)
-            Result.failure(e)
+            Log.w("AbyssJellyfin", "Jellyfin library sync failed", e)
+            LibrarySyncResult.Failure(e)
         }
     }
 
-    override suspend fun fetchMovies(config: JellyfinConfig): List<MediaItem> = withContext(Dispatchers.IO) {
+    override suspend fun syncLibrary(config: JellyfinConfig): Result<SyncedLibrary> =
+        when (val result = syncLibraryDetailed(config)) {
+            is LibrarySyncResult.Success -> Result.success(result.library)
+            is LibrarySyncResult.FetchFailed -> Result.failure(JellyfinLibraryFetchFailedException(result.httpCode))
+            is LibrarySyncResult.Failure -> Result.failure(result.error)
+        }
+
+    private suspend fun fetchMoviesOutcome(config: JellyfinConfig): FetchOutcome = withContext(Dispatchers.IO) {
         val server = cleanUrl(config.serverUrl)
         val userId = config.userId
         val token = config.accessToken
         val fields = "Overview,Genres,CommunityRating,PremiereDate,ProductionYear,RunTimeTicks,MediaStreams,PrimaryImageAspectRatio,ProviderIds,UserData"
         val url = "$server/Users/$userId/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=DateCreated,SortName&SortOrder=Descending&Fields=$fields"
 
-        val root = httpGetJson<JellyfinQueryResponseDto>(url, token) ?: return@withContext emptyList()
-        val items = mutableListOf<MediaItem>()
-        try {
-            for (obj in root.items) {
-                val id = obj.id
-                if (id.isBlank()) continue
-                val name = obj.name
-                val overview = obj.overview.orEmpty()
-                val year = obj.productionYear?.takeIf { it > 0 }?.toString().orEmpty()
-                val rating = obj.communityRating?.takeIf { it > 0.0 }?.let { String.format(Locale.US, "%.1f", it) }.orEmpty()
+        when (val result = fetchJson<JellyfinQueryResponseDto>(url, token)) {
+            is JsonResult.HttpError -> FetchOutcome.Failed(result.code)
+            JsonResult.Error -> FetchOutcome.Failed(null)
+            is JsonResult.Ok -> {
+                val items = mutableListOf<MediaItem>()
+                try {
+                    for (obj in result.value.items) {
+                        val id = obj.id
+                        if (id.isBlank()) continue
+                        val name = obj.name
+                        val overview = obj.overview.orEmpty()
+                        val year = obj.productionYear?.takeIf { it > 0 }?.toString().orEmpty()
+                        val rating = obj.communityRating?.takeIf { it > 0.0 }?.let { String.format(Locale.US, "%.1f", it) }.orEmpty()
 
-                val runTimeTicks = obj.runTimeTicks ?: 0L
-                val durationMs = runTimeTicks / 10_000L
-                val durationStr = if (durationMs > 0L) {
-                    val m = durationMs / 60_000L
-                    "${m / 60}h ${m % 60}m"
-                } else ""
+                        val runTimeTicks = obj.runTimeTicks ?: 0L
+                        val durationMs = runTimeTicks / 10_000L
+                        val durationStr = if (durationMs > 0L) {
+                            val m = durationMs / 60_000L
+                            "${m / 60}h ${m % 60}m"
+                        } else ""
 
-                val userData = obj.userData
-                val played = userData?.played ?: false
-                val posTicks = userData?.playbackPositionTicks ?: 0L
-                val posMs = posTicks / 10_000L
-                val progress = when {
-                    played -> 1.0f
-                    durationMs > 0L && posMs > 0L -> (posMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-                    else -> 0f
+                        val userData = obj.userData
+                        val played = userData?.played ?: false
+                        val posTicks = userData?.playbackPositionTicks ?: 0L
+                        val posMs = posTicks / 10_000L
+                        val progress = when {
+                            played -> 1.0f
+                            durationMs > 0L && posMs > 0L -> (posMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                            else -> 0f
+                        }
+
+                        val groupTitle = obj.genres.firstOrNull().orEmpty()
+                        val tmdbId = obj.providerIds?.get("Tmdb")?.toIntOrNull()
+
+                        val poster = "$server/Items/$id/Images/Primary?fillWidth=400&quality=90"
+                        val backdrop = "$server/Items/$id/Images/Backdrop/0?fillWidth=1280&quality=85"
+                        val streamUrl = getStreamUrl(config, id)
+
+                        items.add(
+                            MediaItem(
+                                id = id,
+                                title = name,
+                                synopsis = overview,
+                                category = MediaCategory.MOVIE,
+                                groupTitle = groupTitle,
+                                rating = rating,
+                                year = year,
+                                durationOrSeasons = durationStr,
+                                qualityBadge = "",
+                                audioBadge = "",
+                                streamUrl = streamUrl,
+                                posterUrl = poster,
+                                backdropUrl = backdrop,
+                                progressPercent = progress,
+                                jellyfinId = id,
+                                tmdbId = tmdbId
+                            )
+                        )
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: SerializationException) {
+                    Log.w("AbyssJellyfin", "Failed to parse Jellyfin movies", e)
                 }
-
-                val groupTitle = obj.genres.firstOrNull().orEmpty()
-                val tmdbId = obj.providerIds?.get("Tmdb")?.toIntOrNull()
-
-                val poster = "$server/Items/$id/Images/Primary?fillWidth=400&quality=90"
-                val backdrop = "$server/Items/$id/Images/Backdrop/0?fillWidth=1280&quality=85"
-                val streamUrl = getStreamUrl(config, id)
-
-                items.add(
-                    MediaItem(
-                        id = id,
-                        title = name,
-                        synopsis = overview,
-                        category = MediaCategory.MOVIE,
-                        groupTitle = groupTitle,
-                        rating = rating,
-                        year = year,
-                        durationOrSeasons = durationStr,
-                        qualityBadge = "",
-                        audioBadge = "",
-                        streamUrl = streamUrl,
-                        posterUrl = poster,
-                        backdropUrl = backdrop,
-                        progressPercent = progress,
-                        jellyfinId = id,
-                        tmdbId = tmdbId
-                    )
-                )
+                FetchOutcome.Ok(items)
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: SerializationException) {
-            Log.w("AbyssJellyfin", "Failed to parse Jellyfin movies", e)
         }
-        items
     }
 
-    override suspend fun fetchSeries(config: JellyfinConfig): List<MediaItem> = withContext(Dispatchers.IO) {
+    override suspend fun fetchMovies(config: JellyfinConfig): List<MediaItem> =
+        (fetchMoviesOutcome(config) as? FetchOutcome.Ok)?.items.orEmpty()
+
+    private suspend fun fetchSeriesOutcome(config: JellyfinConfig): FetchOutcome = withContext(Dispatchers.IO) {
         val server = cleanUrl(config.serverUrl)
         val userId = config.userId
         val token = config.accessToken
         val fields = "Overview,Genres,CommunityRating,PremiereDate,ProductionYear,RunTimeTicks,PrimaryImageAspectRatio,ProviderIds,UserData"
         val url = "$server/Users/$userId/Items?IncludeItemTypes=Series&Recursive=true&SortBy=DateCreated,SortName&SortOrder=Descending&Fields=$fields"
 
-        val root = httpGetJson<JellyfinQueryResponseDto>(url, token) ?: return@withContext emptyList()
-        val items = mutableListOf<MediaItem>()
-        try {
-            for (obj in root.items) {
-                val id = obj.id
-                if (id.isBlank()) continue
-                val name = obj.name
-                val overview = obj.overview.orEmpty()
-                val year = obj.productionYear?.takeIf { it > 0 }?.toString().orEmpty()
-                val rating = obj.communityRating?.takeIf { it > 0.0 }?.let { String.format(Locale.US, "%.1f", it) }.orEmpty()
+        when (val result = fetchJson<JellyfinQueryResponseDto>(url, token)) {
+            is JsonResult.HttpError -> FetchOutcome.Failed(result.code)
+            JsonResult.Error -> FetchOutcome.Failed(null)
+            is JsonResult.Ok -> {
+                val items = mutableListOf<MediaItem>()
+                try {
+                    for (obj in result.value.items) {
+                        val id = obj.id
+                        if (id.isBlank()) continue
+                        val name = obj.name
+                        val overview = obj.overview.orEmpty()
+                        val year = obj.productionYear?.takeIf { it > 0 }?.toString().orEmpty()
+                        val rating = obj.communityRating?.takeIf { it > 0.0 }?.let { String.format(Locale.US, "%.1f", it) }.orEmpty()
 
-                val groupTitle = obj.genres.firstOrNull().orEmpty()
-                val tmdbId = obj.providerIds?.get("Tmdb")?.toIntOrNull()
+                        val groupTitle = obj.genres.firstOrNull().orEmpty()
+                        val tmdbId = obj.providerIds?.get("Tmdb")?.toIntOrNull()
 
-                val poster = "$server/Items/$id/Images/Primary?fillWidth=400&quality=90"
-                val backdrop = "$server/Items/$id/Images/Backdrop/0?fillWidth=1280&quality=85"
+                        val poster = "$server/Items/$id/Images/Primary?fillWidth=400&quality=90"
+                        val backdrop = "$server/Items/$id/Images/Backdrop/0?fillWidth=1280&quality=85"
 
-                items.add(
-                    MediaItem(
-                        id = id,
-                        title = name,
-                        synopsis = overview,
-                        category = MediaCategory.SERIES,
-                        groupTitle = groupTitle,
-                        rating = rating,
-                        year = year,
-                        durationOrSeasons = "",
-                        qualityBadge = "TV HD",
-                        audioBadge = "5.1",
-                        streamUrl = "",
-                        posterUrl = poster,
-                        backdropUrl = backdrop,
-                        jellyfinId = id,
-                        tmdbId = tmdbId
-                    )
-                )
+                        items.add(
+                            MediaItem(
+                                id = id,
+                                title = name,
+                                synopsis = overview,
+                                category = MediaCategory.SERIES,
+                                groupTitle = groupTitle,
+                                rating = rating,
+                                year = year,
+                                durationOrSeasons = "",
+                                qualityBadge = "TV HD",
+                                audioBadge = "5.1",
+                                streamUrl = "",
+                                posterUrl = poster,
+                                backdropUrl = backdrop,
+                                jellyfinId = id,
+                                tmdbId = tmdbId
+                            )
+                        )
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: SerializationException) {
+                    Log.w("AbyssJellyfin", "Failed to parse Jellyfin series", e)
+                }
+                FetchOutcome.Ok(items)
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: SerializationException) {
-            Log.w("AbyssJellyfin", "Failed to parse Jellyfin movies", e)
         }
-        items
     }
+
+    override suspend fun fetchSeries(config: JellyfinConfig): List<MediaItem> =
+        (fetchSeriesOutcome(config) as? FetchOutcome.Ok)?.items.orEmpty()
 
     override suspend fun fetchResumeAndNextUp(config: JellyfinConfig): List<MediaItem> = withContext(Dispatchers.IO) {
         val (resumeList, nextUpList) = coroutineScope {
@@ -618,11 +722,10 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         val seenSeriesIds = mutableSetOf<String>()
 
         val resumeUrl = "$server/UserItems/Resume?userId=$userId&limit=25&mediaTypes=Movie,Episode&Fields=Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesName,SeriesId,SeasonId,ParentIndexNumber,IndexNumber"
-        val resumeRaw = httpGet(resumeUrl, token)
-        if (resumeRaw != null) {
-            try {
-                val root = json.decodeFromString<JellyfinQueryResponseDto>(resumeRaw)
-                for (obj in root.items) {
+        when (val result = fetchJson<JellyfinQueryResponseDto>(resumeUrl, token)) {
+            is JsonResult.Ok -> {
+                try {
+                    for (obj in result.value.items) {
                     val type = obj.type
                     val id = obj.id
                     val runTimeTicks = obj.runTimeTicks ?: 0L
@@ -630,7 +733,11 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
                     val posTicks = userData?.playbackPositionTicks ?: 0L
                     val durationMs = runTimeTicks / 10_000L
                     val posMs = posTicks / 10_000L
-                    val progress = if (durationMs > 0L) (posMs.toFloat() / durationMs.toFloat()).coerceIn(0.01f, 1f) else 0.05f
+                    val progress = when {
+                        userData?.played == true -> 1.0f
+                        durationMs > 0L && posMs > 0L -> (posMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                        else -> 0f
+                    }
 
                     if (type.equals("Movie", ignoreCase = true)) {
                         val name = obj.name
@@ -685,6 +792,8 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
             } catch (e: SerializationException) {
                 Log.w("AbyssJellyfin", "Failed to parse Jellyfin resume items", e)
             }
+            }
+            else -> Unit
         }
         results
     }
@@ -697,45 +806,53 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
 
         val results = mutableListOf<MediaItem>()
         val nextUpUrl = "$server/Shows/NextUp?userId=$userId&limit=25&Fields=Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesName,SeriesId,SeasonId,ParentIndexNumber,IndexNumber"
-        val nextUpRaw = httpGet(nextUpUrl, token)
-        if (nextUpRaw != null) {
-            try {
-                val root = json.decodeFromString<JellyfinQueryResponseDto>(nextUpRaw)
-                for (obj in root.items) {
-                    val id = obj.id
-                    val seriesId = obj.seriesId.orEmpty()
-                    val seriesName = obj.seriesName ?: obj.name
-                    val sNum = obj.parentIndexNumber ?: 1
-                    val eNum = obj.indexNumber ?: 1
-                    val epTitle = obj.name
-                    val sCode = "S${sNum.toString().padStart(2, '0')}E${eNum.toString().padStart(2, '0')}"
-                    val targetSeriesId = seriesId.ifBlank { id }
+        when (val result = fetchJson<JellyfinQueryResponseDto>(nextUpUrl, token)) {
+            is JsonResult.Ok -> {
+                try {
+                    for (obj in result.value.items) {
+                        val id = obj.id
+                        val seriesId = obj.seriesId.orEmpty()
+                        val seriesName = obj.seriesName ?: obj.name
+                        val sNum = obj.parentIndexNumber ?: 1
+                        val eNum = obj.indexNumber ?: 1
+                        val epTitle = obj.name
+                        val sCode = "S${sNum.toString().padStart(2, '0')}E${eNum.toString().padStart(2, '0')}"
+                        val targetSeriesId = seriesId.ifBlank { id }
+                        val posMs = (obj.userData?.playbackPositionTicks ?: 0L) / 10_000L
+                        val durationMs = (obj.runTimeTicks ?: 0L) / 10_000L
+                        val progress = when {
+                            obj.userData?.played == true -> 1.0f
+                            durationMs > 0L && posMs > 0L -> (posMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                            else -> 0f
+                        }
 
-                    results.add(
-                        MediaItem(
-                            id = targetSeriesId,
-                            title = seriesName,
-                            subtitle = "$sCode • $epTitle",
-                            category = MediaCategory.SERIES,
-                            synopsis = obj.overview.orEmpty(),
-                            qualityBadge = "",
-                            streamUrl = getStreamUrl(config, id),
-                            posterUrl = if (seriesId.isNotBlank()) {
-                                "$server/Items/$seriesId/Images/Primary?fillWidth=400&quality=90"
-                            } else {
-                                "$server/Items/$id/Images/Primary?fillWidth=400&quality=90"
-                            },
-                            backdropUrl = "$server/Items/$id/Images/Primary?fillWidth=1280&quality=85",
-                            progressPercent = 0.001f,
-                            jellyfinId = targetSeriesId
+                        results.add(
+                            MediaItem(
+                                id = targetSeriesId,
+                                title = seriesName,
+                                subtitle = "$sCode • $epTitle",
+                                category = MediaCategory.SERIES,
+                                synopsis = obj.overview.orEmpty(),
+                                qualityBadge = "",
+                                streamUrl = getStreamUrl(config, id),
+                                posterUrl = if (seriesId.isNotBlank()) {
+                                    "$server/Items/$seriesId/Images/Primary?fillWidth=400&quality=90"
+                                } else {
+                                    "$server/Items/$id/Images/Primary?fillWidth=400&quality=90"
+                                },
+                                backdropUrl = "$server/Items/$id/Images/Primary?fillWidth=1280&quality=85",
+                                progressPercent = progress,
+                                jellyfinId = targetSeriesId
+                            )
                         )
-                    )
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: SerializationException) {
+                    Log.w("AbyssJellyfin", "Failed to parse Jellyfin next up episodes", e)
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: SerializationException) {
-                Log.w("AbyssJellyfin", "Failed to parse Jellyfin next up episodes", e)
             }
+            else -> Unit
         }
         results
     }
@@ -746,69 +863,89 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         val token = config.accessToken
         val seriesId = seriesItem.id
 
+        fun buildEpisode(eObj: JellyfinItemDto, seasonNum: Int, fallbackIndex: Int): SeriesEpisode {
+            val epId = eObj.id
+            val epNum = eObj.indexNumber ?: (fallbackIndex + 1)
+            val epName = eObj.name.ifBlank { resString(R.string.jellyfin_episode_fallback, epNum) }
+            val durationMs = (eObj.runTimeTicks ?: 0L) / 10_000L
+            val userData = eObj.userData
+            val posMs = (userData?.playbackPositionTicks ?: 0L) / 10_000L
+            val progress = when {
+                userData?.played == true -> 1.0f
+                durationMs > 0L && posMs > 0L -> (posMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                else -> 0f
+            }
+            val epVersions = parseMediaVersions(eObj.mediaSources)
+            return SeriesEpisode(
+                id = epId,
+                seriesId = seriesId,
+                seasonNumber = seasonNum,
+                episodeNumber = epNum,
+                title = epName,
+                plot = eObj.overview.orEmpty(),
+                streamUrl = getStreamUrl(config, epId),
+                posterUrl = "$server/Items/$epId/Images/Primary?fillWidth=400&quality=90",
+                progressPercent = progress,
+                savedPositionMs = posMs,
+                savedDurationMs = durationMs,
+                versions = epVersions,
+                selectedVersionId = epVersions.firstOrNull()?.id
+            )
+        }
+
         try {
-            val (seasonsRaw, allEpisodesRaw) = coroutineScope {
+            val (seasonsResult, episodesResult) = coroutineScope {
                 val seasonsDeferred = async {
-                    httpGet("$server/Shows/$seriesId/Seasons?userId=$userId&Fields=Overview,PrimaryImageAspectRatio", token)
+                    fetchJson<JellyfinQueryResponseDto>("$server/Shows/$seriesId/Seasons?userId=$userId&Fields=Overview,PrimaryImageAspectRatio", token)
                 }
                 val episodesDeferred = async {
-                    httpGet("$server/Shows/$seriesId/Episodes?userId=$userId&Fields=Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,IndexNumber,ParentIndexNumber,MediaSources", token)
+                    fetchJson<JellyfinQueryResponseDto>("$server/Shows/$seriesId/Episodes?userId=$userId&Fields=Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,IndexNumber,ParentIndexNumber,MediaSources", token)
                 }
                 seasonsDeferred.await() to episodesDeferred.await()
             }
-            if (seasonsRaw == null) return@withContext null
-
-            val root = json.decodeFromString<JellyfinQueryResponseDto>(seasonsRaw)
-            val allEpisodes = if (allEpisodesRaw != null) {
-                json.decodeFromString<JellyfinQueryResponseDto>(allEpisodesRaw).items
-            } else emptyList()
+            val seasons = (seasonsResult as? JsonResult.Ok)?.value?.items ?: return@withContext null
+            val allEpisodes = (episodesResult as? JsonResult.Ok)?.value?.items.orEmpty()
 
             val bySeasonId = allEpisodes.groupBy { it.seasonId.orEmpty() }
             val bySeasonNum = allEpisodes.groupBy { it.parentIndexNumber ?: 1 }
+            val matchedIds = mutableSetOf<String>()
 
-            val seasonList = root.items.mapIndexed { s, sObj ->
+            val seasonList = seasons.mapIndexed { s, sObj ->
                 val seasonId = sObj.id
                 val seasonNum = sObj.indexNumber ?: (s + 1)
-                val sName = sObj.name.ifBlank { "Saison $seasonNum" }
+                val sName = sObj.name.ifBlank { resString(R.string.jellyfin_season_fallback, seasonNum) }
                 val rawEps = bySeasonId[seasonId]?.takeIf { it.isNotEmpty() } ?: bySeasonNum[seasonNum].orEmpty()
-
-                val epList = rawEps.mapIndexed { e, eObj ->
-                    val epId = eObj.id
-                    val epNum = eObj.indexNumber ?: (e + 1)
-                    val epName = eObj.name.ifBlank { "Épisode $epNum" }
-                    val overview = eObj.overview.orEmpty()
-                    val durationMs = (eObj.runTimeTicks ?: 0L) / 10_000L
-                    val userData = eObj.userData
-                    val played = userData?.played ?: false
-                    val posMs = (userData?.playbackPositionTicks ?: 0L) / 10_000L
-                    val progress = when {
-                        played -> 1.0f
-                        durationMs > 0L && posMs > 0L -> (posMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-                        else -> 0f
-                    }
-                    val epVersions = parseMediaVersions(eObj.mediaSources)
-                    SeriesEpisode(
-                        id = epId,
-                        seriesId = seriesId,
-                        seasonNumber = seasonNum,
-                        episodeNumber = epNum,
-                        title = epName,
-                        plot = overview,
-                        streamUrl = getStreamUrl(config, epId),
-                        posterUrl = "$server/Items/$epId/Images/Primary?fillWidth=400&quality=90",
-                        progressPercent = progress,
-                        savedPositionMs = posMs,
-                        savedDurationMs = durationMs,
-                        versions = epVersions,
-                        selectedVersionId = epVersions.firstOrNull()?.id
-                    )
-                }
+                matchedIds.addAll(rawEps.map { it.id })
                 SeriesSeason(
                     seasonNumber = seasonNum,
                     name = sName,
-                    episodes = epList
+                    episodes = rawEps.mapIndexed { e, eObj -> buildEpisode(eObj, seasonNum, e) }
                 )
+            }.toMutableList()
+
+            val unmatched = allEpisodes.filterNot { it.id in matchedIds }
+            if (unmatched.isNotEmpty()) {
+                Log.w("AbyssJellyfin", "Series $seriesId: ${unmatched.size}/${allEpisodes.size} episodes unmatched by season; falling back to full episode list")
+                if (seasonList.isEmpty()) {
+                    seasonList.add(
+                        SeriesSeason(
+                            seasonNumber = 1,
+                            name = resString(R.string.jellyfin_season_fallback, 1),
+                            episodes = allEpisodes.mapIndexed { e, eObj -> buildEpisode(eObj, 1, e) }
+                        )
+                    )
+                } else {
+                    val first = seasonList.first()
+                    val known = first.episodes.map { it.id }.toSet()
+                    val extras = unmatched.filterNot { it.id in known }
+                    seasonList[0] = first.copy(
+                        episodes = first.episodes + extras.mapIndexed { e, eObj ->
+                            buildEpisode(eObj, first.seasonNumber, first.episodes.size + e)
+                        }
+                    )
+                }
             }
+
             SeriesDetails(seriesItem = seriesItem, seasons = seasonList)
         } catch (e: CancellationException) {
             throw e
@@ -834,39 +971,37 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         if (config.isConfigured && jfId.isNotBlank()) {
             try {
                 val url = "$server/Users/$userId/Items/$jfId"
-                val raw = httpGet(url, token)
-                if (raw != null) {
-                    val obj = json.decodeFromString<JellyfinItemDto>(raw)
-                    tagline = obj.taglines.firstOrNull()
-                        ?: obj.overviewTagline?.ifBlank { null }
-                        ?: obj.tagline.orEmpty()
-                    tagline = tagline.removePrefix("[\"").removeSuffix("\"]").removeSurrounding("\"").trim()
-                    genres.addAll(obj.genres)
-                    versions.addAll(parseMediaVersions(obj.mediaSources))
+                when (val result = fetchJson<JellyfinItemDto>(url, token)) {
+                    is JsonResult.Ok -> {
+                        val obj = result.value
+                        val decodedTaglines = decodeTaglines(obj.taglines)
+                        tagline = decodedTaglines.firstOrNull { it.isNotBlank() }
+                            ?: obj.overviewTagline?.takeIf { it.isNotBlank() }
+                            ?: obj.tagline?.takeIf { it.isNotBlank() }
+                            ?: ""
+                        genres.addAll(obj.genres)
+                        versions.addAll(parseMediaVersions(obj.mediaSources))
 
-                    if (obj.localTrailerCount > 0) {
-                        val trailersRaw = httpGet("$server/Users/$userId/Items/$jfId/LocalTrailers", token)
-                        if (trailersRaw != null) {
-                            val localTrailers = runCatching {
-                                json.decodeFromString<List<JellyfinTrailerDto>>(trailersRaw)
-                            }.getOrDefault(emptyList())
-
+                        if (obj.localTrailerCount > 0) {
+                            val trailersResult = fetchJson<List<JellyfinTrailerDto>>("$server/Users/$userId/Items/$jfId/LocalTrailers", token)
+                            val localTrailers = (trailersResult as? JsonResult.Ok)?.value.orEmpty()
                             val firstTrailer = localTrailers.firstOrNull()
                             if (firstTrailer != null && firstTrailer.id.isNotBlank()) {
                                 isLocalTrailer = true
                                 trailerUrl = getStreamUrl(config, firstTrailer.id)
-                                trailerName = firstTrailer.name.ifBlank { "Bande-annonce" }
+                                trailerName = firstTrailer.name.ifBlank { resString(R.string.jellyfin_trailer_fallback) }
+                            }
+                        }
+
+                        if (trailerUrl.isBlank()) {
+                            val firstRemote = obj.remoteTrailers.firstOrNull()
+                            if (firstRemote != null && firstRemote.url.isNotBlank()) {
+                                trailerUrl = firstRemote.url
+                                trailerName = firstRemote.name.ifBlank { resString(R.string.jellyfin_trailer_fallback) }
                             }
                         }
                     }
-
-                    if (trailerUrl.isBlank()) {
-                        val firstRemote = obj.remoteTrailers.firstOrNull()
-                        if (firstRemote != null && firstRemote.url.isNotBlank()) {
-                            trailerUrl = firstRemote.url
-                            trailerName = firstRemote.name.ifBlank { "Bande-annonce" }
-                        }
-                    }
+                    else -> Unit
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -893,6 +1028,19 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
             trailerName = trailerName,
             isLocalTrailer = isLocalTrailer
         )
+    }
+
+    private fun decodeTaglines(raw: JsonElement?): List<String> {
+        if (raw == null) return emptyList()
+        return when (raw) {
+            is JsonArray -> raw.mapNotNull { it.jsonPrimitive.contentOrNull?.takeIf { s -> s.isNotBlank() } }
+            is JsonPrimitive -> {
+                val content = raw.contentOrNull.orEmpty()
+                runCatching { json.decodeFromString<List<String>>(content) }
+                    .getOrDefault(listOf(content))
+            }
+            else -> emptyList()
+        }
     }
 
     private fun parseMediaVersions(sources: List<JellyfinMediaSourceDto>): List<MediaVersion> {
@@ -1028,11 +1176,11 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         val fields = "Overview,Genres,CommunityRating,PremiereDate,ProductionYear,RunTimeTicks,PrimaryImageAspectRatio,ProviderIds,UserData"
         val url = "$server/Users/$userId/Items?SearchTerm=$encQuery&IncludeItemTypes=Movie,Series&Recursive=true&Limit=30&Fields=$fields"
 
-        val raw = httpGet(url, token) ?: return@withContext emptyList()
+        val result = fetchJson<JellyfinQueryResponseDto>(url, token)
+        if (result !is JsonResult.Ok) return@withContext emptyList()
         val results = mutableListOf<MediaItem>()
         try {
-            val root = json.decodeFromString<JellyfinQueryResponseDto>(raw)
-            for (obj in root.items) {
+            for (obj in result.value.items) {
                 val id = obj.id
                 if (id.isBlank()) continue
                 val type = obj.type
@@ -1097,7 +1245,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         results
     }
 
-    override fun buildAuthHeaderValue(token: String): String = buildAuthHeader(token)
+    override fun buildAuthHeaderValue(token: String): String = authHeader(resolveDeviceId(), token)
 
     override fun buildWebSocketUrl(config: JellyfinConfig): String? {
         val server = cleanUrl(config.serverUrl)
@@ -1108,9 +1256,8 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
             server.startsWith("http://", ignoreCase = true) -> "ws://${server.substring(7)}"
             else -> return null
         }
-        val encToken = URLEncoder.encode(token, "UTF-8")
         val encDeviceId = URLEncoder.encode(resolveDeviceId(), "UTF-8")
-        return "$wsBase/socket?api_key=$encToken&deviceId=$encDeviceId"
+        return "$wsBase/socket?deviceId=$encDeviceId"
     }
 
     override suspend fun reportCapabilities(config: JellyfinConfig): Boolean = withContext(Dispatchers.IO) {

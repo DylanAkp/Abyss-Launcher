@@ -304,4 +304,16 @@
     <string name="badge_direct">DIRECT</string>
     <string name="subtitle_forced">Forcé</string>
     <string name="subtitle_forced_format">%s (Forcé)</string>
+    <string name="jellyfin_season_fallback">Saison %1$d</string>
+    <string name="jellyfin_episode_fallback">Épisode %1$d</string>
+    <string name="jellyfin_trailer_fallback">Bande-annonce</string>
+
+    <string name="update_needs_permission">Autorisez Abyss TV à installer des applications inconnues, puis relancez la mise à jour</string>
+    <string name="seer_bytes_zero">0 Mo</string>
+    <string name="seer_bytes_gb">%1$.1f Go</string>
+    <string name="seer_bytes_mb">%1$.0f Mo</string>
+    <string name="seer_untitled_series">Série #%1$d</string>
+    <string name="seer_untitled_movie">Film #%1$d</string>
+    <string name="seer_request_success">Demande envoyée avec succès sur Seer !</string>
+    <string name="seer_request_error">Erreur Seer (%1$d) : %2$s</string>
 </resources>

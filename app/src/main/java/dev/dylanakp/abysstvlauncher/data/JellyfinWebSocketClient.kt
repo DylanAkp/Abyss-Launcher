@@ -133,6 +133,7 @@ class JellyfinWebSocketClient(
     private var reconnectJob: Job? = null
     private var keepAliveIntervalMs: Long = 15_000L
     private val reconnectAttempts = AtomicInteger(0)
+    private val socketEpoch = AtomicInteger(0)
 
     fun connect(config: JellyfinConfig) {
         val wsUrl = jellyfinRepository.buildWebSocketUrl(config)
@@ -168,6 +169,7 @@ class JellyfinWebSocketClient(
     fun disconnect() {
         synchronized(lock) {
             activeConfig = null
+            socketEpoch.incrementAndGet()
             reconnectJob?.cancel()
             reconnectJob = null
             keepAliveJob?.cancel()
@@ -191,25 +193,31 @@ class JellyfinWebSocketClient(
             .header("X-Emby-Authorization", authHeader)
             .build()
 
+        val epoch = socketEpoch.incrementAndGet()
         lateinit var createdSocket: WebSocket
         createdSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (epoch != socketEpoch.get()) {
+                    webSocket.close(1000, "Stale socket")
+                    return
+                }
                 reconnectAttempts.set(0)
                 Log.i(TAG, "WebSocket connected")
                 scope.launch {
                     jellyfinRepository.reportCapabilities(config)
                 }
-                startKeepAlive(createdSocket)
+                startKeepAlive(webSocket, epoch)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (epoch != socketEpoch.get()) return
                 when (val event = parseJellyfinWsEvent(text, json)) {
                     is JellyfinWsEvent.ForceKeepAlive -> {
-                        keepAliveIntervalMs = ((event.intervalSec.coerceAtLeast(10) / 2) * 1000L)
-                        startKeepAlive(createdSocket)
+                        keepAliveIntervalMs = event.intervalSec.coerceAtLeast(1) * 1000L
+                        startKeepAlive(webSocket, epoch)
                     }
                     JellyfinWsEvent.KeepAlive -> {
-                        createdSocket.send("""{"MessageType":"KeepAlive"}""")
+                        webSocket.send("""{"MessageType":"KeepAlive"}""")
                     }
                     is JellyfinWsEvent.DisplayMessage -> {
                         _displayMessages.tryEmit(event.message)
@@ -226,23 +234,24 @@ class JellyfinWebSocketClient(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                handleDisconnect(createdSocket)
+                handleDisconnect(webSocket)
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "WebSocket failure: ${t.message}")
-                handleDisconnect(createdSocket)
+                handleDisconnect(webSocket)
             }
         })
         webSocket = createdSocket
     }
 
-    private fun startKeepAlive(socket: WebSocket) {
+    private fun startKeepAlive(socket: WebSocket, epoch: Int) {
         synchronized(lock) {
             keepAliveJob?.cancel()
             keepAliveJob = scope.launch {
                 while (isActive) {
                     delay(keepAliveIntervalMs)
+                    if (epoch != socketEpoch.get()) break
                     if (!socket.send("""{"MessageType":"KeepAlive"}""")) break
                 }
             }

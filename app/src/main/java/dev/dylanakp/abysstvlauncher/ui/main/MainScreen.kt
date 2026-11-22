@@ -158,7 +158,12 @@ fun MainScreen(
             },
             onLaunchExternalFallback = { streamUrl, title ->
                 val tempItem = activeSession.mediaItem.copy(streamUrl = streamUrl, title = title)
-                SystemAppHelper.playMediaExternal(context, tempItem, PlayerPreference.EXTERNAL_PLAYER)
+                SystemAppHelper.playMediaExternal(
+                    context,
+                    tempItem,
+                    PlayerPreference.EXTERNAL_PLAYER,
+                    apiKey = state.jellyfinConfig.accessToken
+                )
             }
         )
         return

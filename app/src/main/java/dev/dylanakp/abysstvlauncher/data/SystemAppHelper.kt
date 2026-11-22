@@ -9,6 +9,7 @@ import android.provider.Settings
 import android.util.Log
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.PlayerPreference
+import java.net.URLEncoder
 
 object SystemAppHelper {
 
@@ -35,12 +36,20 @@ object SystemAppHelper {
     fun playMediaExternal(
         context: Context,
         item: MediaItem,
-        preference: PlayerPreference
+        preference: PlayerPreference,
+        apiKey: String? = null
     ): Boolean {
-        val streamUrl = item.streamUrl.trim()
-            .replace(Regex("([?&])api_key=[^&]*&?"), "$1")
-            .trimEnd('&', '?')
+        var streamUrl = item.streamUrl.trim().trimEnd('&')
         if (streamUrl.isBlank()) return false
+        if (!apiKey.isNullOrBlank()) {
+            val enc = URLEncoder.encode(apiKey, "UTF-8")
+            val apiKeyRegex = Regex("([?&])api_key=[^&]*")
+            streamUrl = if (apiKeyRegex.containsMatchIn(streamUrl)) {
+                apiKeyRegex.replace(streamUrl) { "${it.groupValues[1]}api_key=$enc" }
+            } else {
+                streamUrl + (if ("?" in streamUrl) "&" else "?") + "api_key=$enc"
+            }
+        }
         val uri = Uri.parse(streamUrl)
 
         if (preference == PlayerPreference.EXTERNAL_PLAYER) {

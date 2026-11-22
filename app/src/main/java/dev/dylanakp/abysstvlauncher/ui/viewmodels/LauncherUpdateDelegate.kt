@@ -5,6 +5,7 @@ import android.util.Log
 import dev.dylanakp.abysstvlauncher.BuildConfig
 import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.data.AppUpdateRepository
+import dev.dylanakp.abysstvlauncher.data.InstallResult
 import dev.dylanakp.abysstvlauncher.ui.LauncherUiState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,12 +73,15 @@ internal class LauncherUpdateDelegate(
                 uiState.update { it.copy(updateDownloadProgress = progress) }
             }.onSuccess { apkFile ->
                 uiState.update { it.copy(isDownloadingUpdate = false) }
-                AppUpdateRepository.triggerInstall(context, apkFile).onSuccess {
-                    dismissUpdate()
-                }.onFailure { error ->
-                    Log.e("AbyssUpdate", "Install trigger failed", error)
-                    uiState.update {
-                        it.copy(updateError = error.localizedMessage ?: "Installation failed")
+                when (val result = AppUpdateRepository.triggerInstall(context, apkFile)) {
+                    InstallResult.Success -> dismissUpdate()
+                    InstallResult.NeedsPermission ->
+                        showStatusMessage(R.string.update_needs_permission, emptyArray())
+                    is InstallResult.Failure -> {
+                        Log.e("AbyssUpdate", "Install trigger failed", result.error)
+                        uiState.update {
+                            it.copy(updateError = result.error.localizedMessage ?: "Installation failed")
+                        }
                     }
                 }
             }.onFailure { error ->

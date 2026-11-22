@@ -1,6 +1,8 @@
 package dev.dylanakp.abysstvlauncher.data
 
+import android.content.Context
 import android.util.Log
+import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.domain.repository.SeerRepository as ISeerRepository
 import dev.dylanakp.abysstvlauncher.model.MediaCategory
 import dev.dylanakp.abysstvlauncher.model.MediaItem
@@ -24,8 +26,6 @@ import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.io.IOException
 import java.net.URLEncoder
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 
 @Serializable
 private data class SeerLoginRequest(
@@ -115,17 +115,51 @@ private data class SeerRequestMediaTitleDto(
     val backdropPath: String? = null
 )
 
+private sealed interface SeerCredential {
+    data class ApiKey(val value: String) : SeerCredential
+    data class SessionCookie(val value: String) : SeerCredential
+
+    fun applyTo(builder: Request.Builder) {
+        when (this) {
+            is ApiKey -> builder.header("X-Api-Key", value)
+            is SessionCookie -> builder.header("Cookie", value)
+        }
+    }
+
+    fun storedValue(): String = when (this) {
+        is ApiKey -> value
+        is SessionCookie -> value
+    }
+
+    companion object {
+        fun from(raw: String): SeerCredential? = when {
+            raw.isBlank() -> null
+            raw.startsWith("connect.sid=") -> SessionCookie(raw.substringBefore(";"))
+            else -> ApiKey(raw)
+        }
+    }
+}
+
 object SeerRepository : ISeerRepository, KoinComponent {
 
     private const val TMDB_IMG_W500 = "https://image.tmdb.org/t/p/w500"
     private const val TMDB_IMG_W1280 = "https://image.tmdb.org/t/p/w1280"
 
+    private const val METADATA_CACHE_MAX = 200
+
     private val client: OkHttpClient by inject()
     private val json: Json by inject()
+    private val context: Context by inject()
 
-    private val metadataCache = ConcurrentHashMap<Pair<Boolean, Int>, Triple<String, String, String>>()
+    private val metadataCache = object : LinkedHashMap<Pair<Boolean, Int>, Triple<String, String, String>>(
+        METADATA_CACHE_MAX, 0.75f, true
+    ) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<Pair<Boolean, Int>, Triple<String, String, String>>
+        ): Boolean = size > METADATA_CACHE_MAX
+    }
 
-    override fun clearCache() = metadataCache.clear()
+    override fun clearCache() = synchronized(metadataCache) { metadataCache.clear() }
 
     private fun cleanUrl(raw: String): String =
         raw.trim().trimEnd('/')
@@ -140,13 +174,7 @@ object SeerRepository : ISeerRepository, KoinComponent {
                 .header("User-Agent", "AbyssLauncher/2.0")
                 .header("Accept", "application/json")
 
-            if (apiKey.isNotBlank()) {
-                if (apiKey.startsWith("connect.sid=")) {
-                    reqBuilder.header("Cookie", apiKey)
-                } else {
-                    reqBuilder.header("X-Api-Key", apiKey)
-                }
-            }
+            SeerCredential.from(apiKey)?.applyTo(reqBuilder)
 
             client.newCall(reqBuilder.build()).execute().use { resp ->
                 if (!resp.isSuccessful) {
@@ -174,13 +202,7 @@ object SeerRepository : ISeerRepository, KoinComponent {
                 .header("Accept", "application/json")
                 .post(reqBody)
 
-            if (apiKey.isNotBlank()) {
-                if (apiKey.startsWith("connect.sid=")) {
-                    reqBuilder.header("Cookie", apiKey)
-                } else {
-                    reqBuilder.header("X-Api-Key", apiKey)
-                }
-            }
+            SeerCredential.from(apiKey)?.applyTo(reqBuilder)
 
             client.newCall(reqBuilder.build()).execute().use { resp ->
                 val text = resp.body?.string().orEmpty()
@@ -221,8 +243,8 @@ object SeerRepository : ISeerRepository, KoinComponent {
                         try {
                             val settingsReq = Request.Builder()
                                 .url("$server/api/v1/settings/main")
-                                .header("Cookie", sessionCookie)
                                 .header("Accept", "application/json")
+                                .apply { SeerCredential.SessionCookie(sessionCookie).applyTo(this) }
                                 .build()
                             client.newCall(settingsReq).execute().use { settingsResp ->
                                 if (settingsResp.isSuccessful) {
@@ -237,12 +259,14 @@ object SeerRepository : ISeerRepository, KoinComponent {
                         }
                     }
 
-                    val finalToken = when {
-                        apiKey.isNotBlank() -> apiKey
-                        !sessionCookie.isNullOrBlank() -> sessionCookie
-                        else -> "connected"
+                    val credential = when {
+                        apiKey.isNotBlank() -> SeerCredential.ApiKey(apiKey)
+                        !sessionCookie.isNullOrBlank() -> SeerCredential.SessionCookie(sessionCookie)
+                        else -> return@withContext Result.failure(
+                            IllegalStateException("Seer authentication produced no usable credential")
+                        )
                     }
-                    Result.success(finalToken)
+                    Result.success(credential.storedValue())
                 } else {
                     val err = response.body?.string() ?: "HTTP ${response.code}"
                     Result.failure(Exception("Authentication failed (${response.code}): $err"))
@@ -341,13 +365,13 @@ object SeerRepository : ISeerRepository, KoinComponent {
     }
 
     private fun formatBytes(bytes: Long): String {
-        if (bytes <= 0L) return "0 Mo"
+        if (bytes <= 0L) return context.getString(R.string.seer_bytes_zero)
         val gigabytes = bytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
         return if (gigabytes >= 1.0) {
-            String.format(java.util.Locale.US, "%.1f Go", gigabytes)
+            String.format(java.util.Locale.US, context.getString(R.string.seer_bytes_gb), gigabytes)
         } else {
             val megabytes = bytes.toDouble() / (1024.0 * 1024.0)
-            String.format(java.util.Locale.US, "%.0f Mo", megabytes)
+            String.format(java.util.Locale.US, context.getString(R.string.seer_bytes_mb), megabytes)
         }
     }
 
@@ -365,7 +389,7 @@ object SeerRepository : ISeerRepository, KoinComponent {
                 val isTv = mediaObj.mediaType.equals("tv", ignoreCase = true)
                 val tmdbId = mediaObj.tmdbId
                 val title = reqObj.movie?.title?.ifBlank { null } ?: reqObj.tv?.name?.ifBlank { null } ?: ""
-                if (title.isBlank() && tmdbId > 0 && !metadataCache.containsKey(Pair(isTv, tmdbId))) {
+                if (title.isBlank() && tmdbId > 0 && !synchronized(metadataCache) { metadataCache.containsKey(Pair(isTv, tmdbId)) }) {
                     Pair(isTv, tmdbId)
                 } else null
             }.distinct()
@@ -389,7 +413,9 @@ object SeerRepository : ISeerRepository, KoinComponent {
                         }
                     }.awaitAll()
                 }
-                fetched.filterNotNull().forEach { (key, meta) -> metadataCache[key] = meta }
+                synchronized(metadataCache) {
+                    fetched.filterNotNull().forEach { (key, meta) -> metadataCache[key] = meta }
+                }
             }
 
             for (reqObj in root.results) {
@@ -415,7 +441,7 @@ object SeerRepository : ISeerRepository, KoinComponent {
                     ?: ""
 
                 if (title.isBlank() && tmdbId > 0) {
-                    val cached = metadataCache[Pair(isTv, tmdbId)]
+                    val cached = synchronized(metadataCache) { metadataCache[Pair(isTv, tmdbId)] }
                     if (cached != null) {
                         title = cached.first
                         posterPath = cached.second
@@ -424,7 +450,10 @@ object SeerRepository : ISeerRepository, KoinComponent {
                 }
 
                 if (title.isBlank()) {
-                    title = if (isTv) "Série #$tmdbId" else "Film #$tmdbId"
+                    title = context.getString(
+                        if (isTv) R.string.seer_untitled_series else R.string.seer_untitled_movie,
+                        tmdbId
+                    )
                 }
 
                 val poster = if (posterPath.isNotBlank()) "$TMDB_IMG_W500$posterPath" else ""
@@ -487,9 +516,9 @@ object SeerRepository : ISeerRepository, KoinComponent {
 
             val (code, text) = httpPost(endpoint, config.apiKey, body)
             if (code in 200..299) {
-                Result.success("Demande envoyée avec succès sur Seer !")
+                Result.success(context.getString(R.string.seer_request_success))
             } else {
-                Result.failure(Exception("Erreur Seer ($code) : $text"))
+                Result.failure(Exception(context.getString(R.string.seer_request_error, code, text)))
             }
         } catch (e: CancellationException) {
             throw e
