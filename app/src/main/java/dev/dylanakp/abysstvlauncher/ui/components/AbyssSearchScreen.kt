@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,8 +44,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import dev.dylanakp.abysstvlauncher.ui.focus.FocusSlotHolder
+import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
 import dev.dylanakp.abysstvlauncher.ui.focus.dpadNavigation
 import dev.dylanakp.abysstvlauncher.ui.focus.safeRequestFocus
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -81,7 +85,6 @@ fun AbyssSearchScreen(
     searchResults: List<MediaItem> = emptyList(),
     isSearching: Boolean = false,
     searchHistory: List<String> = emptyList(),
-    searchInputFocusRequester: FocusRequester,
     onQueryChange: (String) -> Unit,
     onSubmitQuery: (String) -> Unit = {},
     onSelectSearchHistory: (String) -> Unit = {},
@@ -96,6 +99,7 @@ fun AbyssSearchScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
+    val searchInputFocusRequester = LocalFocusSlots.current.requester(FocusSlotHolder.SEARCH_INPUT)
     val firstResultFocusRequester = remember { FocusRequester() }
     val clearButtonFocusRequester = remember { FocusRequester() }
     val searchResultsListState = rememberLazyListState()
@@ -115,12 +119,11 @@ fun AbyssSearchScreen(
         }
     }
 
-    // Focus the search field and summon the integrated TV keyboard on entry
-    RequestModalInitialFocus(
-        focusRequester = searchInputFocusRequester,
-        Unit,
-        onFocused = { keyboardController?.show() }
-    )
+    // One-shot focus on entry; no frame-retry loop.
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        if (searchInputFocusRequester.safeRequestFocus()) keyboardController?.show()
+    }
 
     LaunchedEffect(trimmedQuery, searchResults) {
         searchResultsListState.scrollToItem(0, 0)
@@ -290,7 +293,12 @@ fun AbyssSearchScreen(
                             if (clearFocused) AbyssBorderFocus else AbyssBorderHairline,
                             RoundedCornerShape(50)
                         )
-                        .onFocusChanged { clearFocused = it.isFocused }
+                        .tvClickable(onFocused = { clearFocused = it }) {
+                            onQueryChange("")
+                            if (searchInputFocusRequester.safeRequestFocus()) {
+                                keyboardController?.show()
+                            }
+                        }
                         .dpadNavigation(
                             onUp = { onNavigateUpToTopBar() },
                             onDown = {
@@ -298,12 +306,6 @@ fun AbyssSearchScreen(
                                 true
                             }
                         )
-                        .clickable {
-                            onQueryChange("")
-                            if (searchInputFocusRequester.safeRequestFocus()) {
-                                keyboardController?.show()
-                            }
-                        }
                         .padding(horizontal = 16.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -377,12 +379,13 @@ fun AbyssSearchScreen(
                                                 if (isClearFocused) Color.White else Color.Transparent,
                                                 RoundedCornerShape(6.dp)
                                             )
-                                            .onFocusChanged { isClearFocused = it.isFocused }
+                                            .tvClickable(onFocused = { isClearFocused = it }) {
+                                                onClearSearchHistory()
+                                            }
                                             .dpadNavigation(
                                                 onUp = navigateBackToSearchInput,
                                                 onDown = { firstResultFocusRequester.safeRequestFocus() }
                                             )
-                                            .clickable { onClearSearchHistory() }
                                             .padding(horizontal = 10.dp, vertical = 4.dp)
                                     ) {
                                         Text(

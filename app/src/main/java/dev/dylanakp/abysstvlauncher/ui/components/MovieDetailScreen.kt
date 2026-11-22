@@ -3,7 +3,6 @@ package dev.dylanakp.abysstvlauncher.ui.components
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,13 +28,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -58,7 +57,10 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssSurfaceGlassElevated
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.theme.AbyssVoid
-import kotlinx.coroutines.delay
+import dev.dylanakp.abysstvlauncher.ui.focus.FocusSlotHolder
+import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
+import dev.dylanakp.abysstvlauncher.ui.focus.safeRequestFocus
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 
 @Composable
 fun MovieDetailScreen(
@@ -84,30 +86,25 @@ fun MovieDetailScreen(
 
     val playButtonRequester = remember { FocusRequester() }
     val versionMenuFirstItemRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        for (attempt in 0 until 3) {
+            withFrameNanos { }
+            if (playButtonRequester.safeRequestFocus()) break
+        }
+    }
     val versions = movieDetails?.versions.orEmpty()
     val selectedVersion = versions.firstOrNull { it.id == movieDetails?.selectedVersionId }
         ?: versions.firstOrNull()
 
     val historyEntry = playbackHistory[movieItem.id]
     val hasSavedPos = historyEntry != null && historyEntry.progressPercent < 0.95f && historyEntry.positionMs > 15_000L
-    val resumeTimeStr = if (hasSavedPos && historyEntry != null) {
-        val totalSec = historyEntry.positionMs / 1000L
+    val resumeTimeStr = historyEntry?.takeIf { hasSavedPos }?.let { entry ->
+        val totalSec = entry.positionMs / 1000L
         val min = totalSec / 60L
         val sec = totalSec % 60L
         String.format(java.util.Locale.US, "%02d:%02d", min, sec)
-    } else ""
-
-    RequestModalInitialFocus(playButtonRequester, movieItem.id)
-
-    var wasVersionMenuOpen by remember { mutableStateOf(false) }
-    RequestModalInitialFocus(
-        focusRequester = if (showVersionMenu) versionMenuFirstItemRequester else playButtonRequester,
-        showVersionMenu,
-        enabled = showVersionMenu || wasVersionMenuOpen
-    )
-    LaunchedEffect(showVersionMenu) {
-        wasVersionMenuOpen = showVersionMenu
-    }
+    }.orEmpty()
 
     Box(
         modifier = modifier
@@ -337,9 +334,12 @@ fun MovieDetailScreen(
 
         // 3. VERSION PICKER MODAL
         if (showVersionMenu && versions.size > 1) {
-            AbyssModalOverlay(
+            AbyssModalHost(
+                onDismiss = { showVersionMenu = false },
+                initialFocusRequester = versionMenuFirstItemRequester,
+                restoreFocusTo = LocalFocusSlots.current.requester(FocusSlotHolder.HERO_PLAY),
                 scrimColor = Color(0xD9000000),
-                onDismiss = { showVersionMenu = false }
+                contentAlignment = Alignment.Center
             ) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -351,7 +351,7 @@ fun MovieDetailScreen(
                         .clip(RoundedCornerShape(20.dp))
                         .background(AbyssSurfaceGlassElevated)
                         .border(1.dp, AbyssBorderHairline, RoundedCornerShape(20.dp))
-                        .clickable(enabled = false) {}
+                        .tvClickable(isBusy = true, onFocused = {}) { }
                         .padding(24.dp)
                 ) {
                     Column(
@@ -460,8 +460,7 @@ private fun VersionSelectionCard(
                 },
                 RoundedCornerShape(12.dp)
             )
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
+            .tvClickable(onFocused = { isFocused = it }, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         Row(
@@ -543,8 +542,7 @@ private fun MovieActionButton(
             }
             .clip(shape)
             .background(bgColor)
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
+            .tvClickable(onFocused = { isFocused = it }, onClick = onClick)
             .padding(horizontal = horizontalPadding, vertical = 11.dp),
         contentAlignment = Alignment.Center
     ) {

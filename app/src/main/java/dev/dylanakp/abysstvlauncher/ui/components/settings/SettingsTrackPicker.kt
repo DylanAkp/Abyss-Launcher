@@ -42,8 +42,7 @@ import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.model.TrackPreference
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
-import dev.dylanakp.abysstvlauncher.ui.components.AbyssModalOverlay
-import dev.dylanakp.abysstvlauncher.ui.components.RequestModalInitialFocus
+import dev.dylanakp.abysstvlauncher.ui.components.AbyssModalHost
 
 enum class TrackPickerKind { AUDIO, SUBTITLE }
 
@@ -74,6 +73,7 @@ fun SettingsPickerRow(
     subtitle: String,
     valueLabel: String,
     icon: AbyssIconType? = null,
+    focusRequester: FocusRequester? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -86,6 +86,7 @@ fun SettingsPickerRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) Color(0xFFE8EAED) else Color(0xFF181A1F))
@@ -144,7 +145,8 @@ fun SettingsTrackPicker(
     options: List<String>,
     selected: String,
     onSelect: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    restoreFocusTo: FocusRequester? = null
 ) {
     val firstItemRequester = remember { FocusRequester() }
     val closeRequester = remember { FocusRequester() }
@@ -152,14 +154,12 @@ fun SettingsTrackPicker(
         if (kind == TrackPickerKind.AUDIO) R.string.pref_audio_language_title else R.string.pref_subtitle_language_title
     )
 
-    RequestModalInitialFocus(
-        focusRequester = firstItemRequester,
-        kind,
-        enabled = true,
-        fallbackRequester = closeRequester
-    )
-
-    AbyssModalOverlay(scrimColor = Color(0xD905060A), onDismiss = onDismiss) {
+    AbyssModalHost(
+        onDismiss = onDismiss,
+        initialFocusRequester = firstItemRequester,
+        scrimColor = Color(0xD905060A),
+        restoreFocusTo = restoreFocusTo
+    ) {
         Box(
             modifier = Modifier
                 .width(540.dp)

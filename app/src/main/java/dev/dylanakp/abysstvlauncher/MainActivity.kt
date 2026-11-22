@@ -37,6 +37,8 @@ import dev.dylanakp.abysstvlauncher.remote.TvCommandController
 import dev.dylanakp.abysstvlauncher.theme.AbyssTVLauncherTheme
 import dev.dylanakp.abysstvlauncher.ui.LauncherViewModel
 import dev.dylanakp.abysstvlauncher.ui.components.JellyfinMessageOverlay
+import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
+import dev.dylanakp.abysstvlauncher.ui.focus.rememberFocusSlotHolder
 import dev.dylanakp.abysstvlauncher.ui.main.MainScreen
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
@@ -115,9 +117,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            val focusSlots = rememberFocusSlotHolder()
             CompositionLocalProvider(
                 LocalContext provides localizedContext,
-                LocalConfiguration provides localizedContext.resources.configuration
+                LocalConfiguration provides localizedContext.resources.configuration,
+                LocalFocusSlots provides focusSlots
             ) {
                 AbyssTVLauncherTheme {
                     Surface(

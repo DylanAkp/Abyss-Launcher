@@ -4,7 +4,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -22,7 +21,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
@@ -30,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 
 @Composable
 fun OsdPillButton(
@@ -69,8 +68,7 @@ fun OsdPillButton(
             }
             .clip(RoundedCornerShape(50))
             .background(bgColor)
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
+            .tvClickable(onFocused = { isFocused = it }) { onClick() }
             .padding(horizontal = if (label.isEmpty()) 12.dp else 16.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {

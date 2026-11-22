@@ -290,7 +290,7 @@ class TvCommandController(
                             activity.runOnUiThread {
                                 val targetView = resolveTargetRootView(activity) ?: return@runOnUiThread
                                 if (!targetView.hasFocus()) {
-                                    targetView.requestFocus()
+                                    runCatching { targetView.requestFocus() }
                                 }
                                 val now = SystemClock.uptimeMillis()
                                 if (longPress) {

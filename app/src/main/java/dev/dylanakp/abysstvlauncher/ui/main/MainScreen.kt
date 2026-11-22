@@ -36,18 +36,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -83,9 +77,10 @@ import dev.dylanakp.abysstvlauncher.ui.components.HeroSpotlightContent
 import dev.dylanakp.abysstvlauncher.ui.components.MediaDetailModal
 import dev.dylanakp.abysstvlauncher.ui.components.MediaRow
 import dev.dylanakp.abysstvlauncher.ui.components.MovieDetailScreen
-import dev.dylanakp.abysstvlauncher.ui.components.RequestModalInitialFocus
 import dev.dylanakp.abysstvlauncher.ui.components.SeriesDetailScreen
 import dev.dylanakp.abysstvlauncher.ui.components.SettingsDrawer
+import dev.dylanakp.abysstvlauncher.ui.focus.FocusSlotHolder
+import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
 import dev.dylanakp.abysstvlauncher.ui.focus.safeRequestFocus
 import dev.dylanakp.abysstvlauncher.ui.player.AbyssPlayerScreen
 import kotlinx.coroutines.delay
@@ -230,49 +225,19 @@ fun MainScreen(
         return
     }
 
-    // Focus requesters for D-pad navigation
-    val topBarFocusRequester = remember { FocusRequester() }
-    val heroPlayFocusRequester = remember { FocusRequester() }
-    val contentFirstFocusRequester = remember { FocusRequester() }
-    val searchFirstKeyFocusRequester = remember { FocusRequester() }
-    val settingsNavFocusRequester = remember { FocusRequester() }
+    // Focus slots are owned by a single holder; widgets never receive requesters as parameters.
+    val focusSlots = LocalFocusSlots.current
+    val topBarFocusRequester = focusSlots.requester(FocusSlotHolder.TOP_BAR)
+    val heroPlayFocusRequester = focusSlots.requester(FocusSlotHolder.HERO_PLAY)
+    val contentFirstFocusRequester = focusSlots.requester(FocusSlotHolder.FIRST_CONTENT)
+    val searchFirstKeyFocusRequester = focusSlots.requester(FocusSlotHolder.SEARCH_INPUT)
     val mainListState = rememberLazyListState()
     val appsGridState = rememberLazyGridState()
 
-    val isAnyOverlayOpen = state.isSettingsDrawerOpen ||
-        state.pendingUpdate != null ||
-        state.selectedMediaForDetails != null ||
-        state.selectedAppForMenu != null ||
-        state.selectedMediaForMenu != null
-    val latestIsAnyOverlayOpen by rememberUpdatedState(isAnyOverlayOpen)
-    var wasSettingsDrawerOpen by remember { mutableStateOf(false) }
-    var hasDoneInitialBootFocus by remember { mutableStateOf(false) }
-
-    // Ensure initial focus targets Home Tab once on launcher startup
+    // One-shot initial focus. Modal hosts now own their own focus + restore.
     LaunchedEffect(Unit) {
-        if (!hasDoneInitialBootFocus) {
-            hasDoneInitialBootFocus = true
-            repeat(6) { attempt ->
-                withFrameNanos { }
-                if (latestIsAnyOverlayOpen) return@LaunchedEffect
-                if (topBarFocusRequester.safeRequestFocus()) return@LaunchedEffect
-                delay(32L * (attempt + 1))
-            }
-        }
-    }
-
-    LaunchedEffect(state.isSettingsDrawerOpen) {
-        if (wasSettingsDrawerOpen && !state.isSettingsDrawerOpen && !latestIsAnyOverlayOpen) {
-            repeat(6) { attempt ->
-                withFrameNanos { }
-                if (topBarFocusRequester.safeRequestFocus()) {
-                    wasSettingsDrawerOpen = state.isSettingsDrawerOpen
-                    return@LaunchedEffect
-                }
-                delay(32L * (attempt + 1))
-            }
-        }
-        wasSettingsDrawerOpen = state.isSettingsDrawerOpen
+        withFrameNanos { }
+        topBarFocusRequester.safeRequestFocus()
     }
 
     LaunchedEffect(state.selectedTab) {
@@ -311,7 +276,7 @@ fun MainScreen(
 
     val onNavigateDownFromTopBar: () -> Boolean = {
         when {
-            state.isSettingsDrawerOpen -> settingsNavFocusRequester.safeRequestFocus()
+            state.isSettingsDrawerOpen -> focusSlots.requester(FocusSlotHolder.SETTINGS_NAV).safeRequestFocus()
             state.isSearchActive -> searchFirstKeyFocusRequester.safeRequestFocus()
             state.selectedTab == AbyssNavTab.HOME && state.activeHeroItem != null -> {
                 heroPlayFocusRequester.safeRequestFocus() || contentFirstFocusRequester.safeRequestFocus()
@@ -332,17 +297,7 @@ fun MainScreen(
             .fillMaxSize()
             .background(AbyssVoid)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .focusProperties {
-                    onEnter = {
-                        if (isAnyOverlayOpen) {
-                            cancelFocusChange()
-                        }
-                    }
-                }
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
         if (state.isSearchActive) {
             AbyssSearchScreen(
                 query = state.searchQuery,
@@ -353,7 +308,6 @@ fun MainScreen(
                 searchResults = state.searchResults,
                 isSearching = state.isSearching,
                 searchHistory = state.searchHistory,
-                searchInputFocusRequester = searchFirstKeyFocusRequester,
                 onQueryChange = { viewModel.setSearchQuery(it) },
                 onSubmitQuery = { viewModel.addSearchHistory(it) },
                 onSelectSearchHistory = { viewModel.selectSearchHistory(it) },
@@ -469,14 +423,13 @@ fun MainScreen(
                 }
             }
         }
-        }
 
         MainOverlays(
             state = state,
             viewModel = viewModel,
             context = context,
-            playMediaItem = playMediaItem,
-            settingsNavFocusRequester = settingsNavFocusRequester
+            playMediaItem = playMediaItem
         )
+        }
     }
 }

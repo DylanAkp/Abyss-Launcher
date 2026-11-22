@@ -14,7 +14,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +45,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.dylanakp.abysstvlauncher.player.PlayerManager
 import dev.dylanakp.abysstvlauncher.player.TrackOption
@@ -57,7 +57,6 @@ import androidx.compose.ui.res.stringResource
 import dev.dylanakp.abysstvlauncher.R
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -96,6 +95,9 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.theme.AbyssVoid
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
+import dev.dylanakp.abysstvlauncher.ui.focus.FocusSlotHolder
+import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
+import dev.dylanakp.abysstvlauncher.ui.focus.safeRequestFocus
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -161,8 +163,9 @@ fun AbyssPlayerScreen(
         mutableStateOf(session.savedResumePositionMs > 15_000L && session.startPositionMs == 0L)
     }
 
+    val focusSlots = LocalFocusSlots.current
     val rootFocusRequester = remember { FocusRequester() }
-    val playPauseFocusRequester = remember { FocusRequester() }
+    val playPauseFocusRequester = focusSlots.requester(FocusSlotHolder.PLAYER_OSD)
     val resumeButtonFocusRequester = remember { FocusRequester() }
     val retryButtonFocusRequester = remember { FocusRequester() }
 
@@ -277,18 +280,22 @@ fun AbyssPlayerScreen(
     }
 
     // Remote D-Pad Focus Management across OSD, Modals, Error Overlay, and Fullscreen Video
-    val targetFocusRequester = when {
-        playerError != null -> retryButtonFocusRequester
-        activeModal != PlayerModalType.NONE -> null
-        showResumePrompt && showOsd -> resumeButtonFocusRequester
-        showOsd -> playPauseFocusRequester
-        else -> rootFocusRequester
+    val focusTargetKey = when {
+        playerError != null -> "error"
+        activeModal != PlayerModalType.NONE -> "modal"
+        showResumePrompt && showOsd -> "resume"
+        showOsd -> "osd"
+        else -> "root"
     }
-    if (targetFocusRequester != null) {
-        dev.dylanakp.abysstvlauncher.ui.components.RequestModalInitialFocus(
-            focusRequester = targetFocusRequester,
-            showOsd, showResumePrompt, activeModal, playerError
-        )
+    LaunchedEffect(focusTargetKey) {
+        if (focusTargetKey == "modal") return@LaunchedEffect
+        withFrameNanos { }
+        when (focusTargetKey) {
+            "error" -> retryButtonFocusRequester.safeRequestFocus()
+            "resume" -> resumeButtonFocusRequester.safeRequestFocus()
+            "osd" -> playPauseFocusRequester.safeRequestFocus()
+            "root" -> rootFocusRequester.safeRequestFocus()
+        }
     }
 
     fun triggerSeekDelta(deltaMs: Long) {
@@ -301,16 +308,8 @@ fun AbyssPlayerScreen(
         showOsd = true
     }
 
-    BackHandler {
-        when {
-            activeModal != PlayerModalType.NONE -> {
-                activeModal = PlayerModalType.NONE
-                lastInteractionTick = System.currentTimeMillis()
-            }
-            else -> {
-                onBack(exoPlayer.currentPosition.coerceAtLeast(0L), durationMs)
-            }
-        }
+    BackHandler(enabled = activeModal == PlayerModalType.NONE) {
+        onBack(exoPlayer.currentPosition.coerceAtLeast(0L), durationMs)
     }
 
     Box(

@@ -2,7 +2,6 @@ package dev.dylanakp.abysstvlauncher.ui.main
 
 import android.content.Context
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.focus.FocusRequester
 import dev.dylanakp.abysstvlauncher.data.SystemAppHelper
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.ui.LauncherUiState
@@ -18,8 +17,7 @@ fun MainOverlays(
     state: LauncherUiState,
     viewModel: LauncherViewModel,
     context: Context,
-    playMediaItem: (MediaItem) -> Unit,
-    settingsNavFocusRequester: FocusRequester
+    playMediaItem: (MediaItem) -> Unit
 ) {
     AppContextMenu(
         app = state.selectedAppForMenu,
@@ -69,7 +67,6 @@ fun MainOverlays(
 
     SettingsDrawer(
         isOpen = state.isSettingsDrawerOpen,
-        navInitialFocusRequester = settingsNavFocusRequester,
         jellyfinConfig = state.jellyfinConfig,
         seerConfig = state.seerConfig,
         trackPreference = state.trackPreference,

@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,7 +39,6 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -56,6 +54,9 @@ import dev.dylanakp.abysstvlauncher.model.TvAppInfo
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
+import dev.dylanakp.abysstvlauncher.ui.focus.FocusSlotHolder
+import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 
 @Composable
 fun AppContextMenu(
@@ -73,14 +74,11 @@ fun AppContextMenu(
     val initialFocusRequester = remember { FocusRequester() }
     var hasSeenFreshDown by remember(app.packageName) { mutableStateOf(false) }
 
-    RequestModalInitialFocus(
-        focusRequester = initialFocusRequester,
-        app.packageName
-    )
-
-    AbyssModalOverlay(
+    AbyssModalHost(
         scrimColor = Color(0xB305070C),
         onDismiss = onDismiss,
+        initialFocusRequester = initialFocusRequester,
+        restoreFocusTo = LocalFocusSlots.current.requester(FocusSlotHolder.FIRST_CONTENT),
         modifier = Modifier.onPreviewKeyEvent { event ->
             val native = event.nativeKeyEvent
             val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
@@ -120,7 +118,7 @@ fun AppContextMenu(
                             )
                         )
                     )
-                    .clickable(enabled = false) {}
+                    .tvClickable(isBusy = true, onClick = {})
                     .padding(22.dp)
             ) {
                 Column(
@@ -286,8 +284,7 @@ private fun ContextMenuItem(
                     else -> Color(0x12FFFFFF)
                 }
             )
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
+            .tvClickable(onFocused = { isFocused = it }, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 9.dp),
         contentAlignment = Alignment.CenterStart
     ) {

@@ -9,7 +9,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,6 +55,7 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssVoid
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssMediaArtwork
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 import dev.dylanakp.abysstvlauncher.ui.player.formatDurationMs
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -405,11 +405,13 @@ fun SeriesActionPill(
             }
             .clip(RoundedCornerShape(50))
             .background(bgColor)
-            .onFocusChanged {
-                isFocused = it.isFocused
-                if (it.isFocused) onFocused?.invoke()
-            }
-            .clickable { onClick() }
+            .tvClickable(
+                onFocused = { focused ->
+                    isFocused = focused
+                    if (focused) onFocused?.invoke()
+                },
+                onClick = onClick
+            )
             .padding(horizontal = 18.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center
     ) {

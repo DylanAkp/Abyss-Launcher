@@ -25,7 +25,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -45,6 +44,7 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.theme.AbyssVoid
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -283,7 +283,7 @@ fun PlayerOsdOverlay(
                             .height(if (seekBarFocused) 10.dp else 6.dp)
                             .clip(RoundedCornerShape(50))
                             .background(Color(0x33FFFFFF))
-                            .onFocusChanged { seekBarFocused = it.isFocused }
+                            .tvClickable(onFocused = { seekBarFocused = it }) { }
                             .onPreviewKeyEvent { ev ->
                                 if (ev.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                                     when (ev.nativeKeyEvent.keyCode) {

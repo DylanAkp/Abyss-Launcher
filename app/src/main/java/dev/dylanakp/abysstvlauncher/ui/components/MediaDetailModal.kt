@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,11 +29,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
@@ -51,7 +47,9 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssGold
 import dev.dylanakp.abysstvlauncher.theme.AbyssSurfaceGlassElevated
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
-import kotlinx.coroutines.delay
+import dev.dylanakp.abysstvlauncher.ui.focus.FocusSlotHolder
+import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 
 @Composable
 fun MediaDetailModal(
@@ -65,17 +63,15 @@ fun MediaDetailModal(
 
     val primaryButtonRequester = remember { FocusRequester() }
 
-    RequestModalInitialFocus(
-        focusRequester = primaryButtonRequester,
-        item
-    )
-
     val isAvailable = item.streamUrl.isNotBlank() || item.jellyfinId.isNotBlank() || (isSeerConfigured && item.seerStatus == SeerMediaStatus.AVAILABLE)
     val canRequest = isSeerConfigured && !isAvailable && item.tmdbId != null && item.seerStatus != SeerMediaStatus.PROCESSING && item.seerStatus != SeerMediaStatus.PENDING_APPROVAL
 
-    AbyssModalOverlay(
+    AbyssModalHost(
+        onDismiss = onDismiss,
+        initialFocusRequester = primaryButtonRequester,
+        restoreFocusTo = LocalFocusSlots.current.requester(FocusSlotHolder.FIRST_CONTENT),
         scrimColor = Color(0xCC000000),
-        onDismiss = onDismiss
+        contentAlignment = Alignment.Center
     ) {
         Box(
             modifier = Modifier
@@ -364,8 +360,7 @@ private fun ModalActionButton(
                     else -> Color(0x18FFFFFF)
                 }
             )
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
+            .tvClickable(onFocused = { isFocused = it }, onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center
     ) {

@@ -3,7 +3,6 @@ package dev.dylanakp.abysstvlauncher.ui.components
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,12 +29,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -55,7 +54,8 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssTextMuted
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.theme.AbyssVoid
-import kotlinx.coroutines.delay
+import dev.dylanakp.abysstvlauncher.ui.focus.safeRequestFocus
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 
 data class CatalogSelection(
     val title: String,
@@ -92,7 +92,10 @@ fun CategoryCatalogScreen(
         }
     }
 
-    RequestModalInitialFocus(firstItemFocusRequester, Unit)
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        firstItemFocusRequester.safeRequestFocus()
+    }
 
     Column(
         modifier = modifier
@@ -245,8 +248,7 @@ private fun CatalogBackButton(
             .focusRequester(focusRequester)
             .clip(RoundedCornerShape(50))
             .background(if (isFocused) Color.White else AbyssPillGlass)
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
+            .tvClickable(onFocused = { isFocused = it }) { onClick() }
             .padding(horizontal = 14.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {

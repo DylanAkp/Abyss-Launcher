@@ -44,7 +44,9 @@ fun JellyfinSectionContent(
     isSyncing: Boolean,
     onSaveAndConnect: (String, String, String) -> Unit,
     onSelectPlayerPreference: (PlayerPreference) -> Unit,
-    onOpenTrackPicker: (TrackPickerKind) -> Unit
+    onOpenTrackPicker: (TrackPickerKind) -> Unit,
+    audioRowRequester: FocusRequester? = null,
+    subtitleRowRequester: FocusRequester? = null
 ) {
     var serverUrl by remember(config.serverUrl) { mutableStateOf(config.serverUrl) }
     var username by remember(config.username) { mutableStateOf(config.username) }
@@ -167,6 +169,7 @@ fun JellyfinSectionContent(
                     subtitle = stringResource(R.string.pref_audio_language_sub),
                     icon = AbyssIconType.AUDIO_SPEAKER,
                     valueLabel = trackLanguageLabel(trackPreference.audioChoice()),
+                    focusRequester = audioRowRequester,
                     onClick = { onOpenTrackPicker(TrackPickerKind.AUDIO) }
                 )
                 SettingsPickerRow(
@@ -174,6 +177,7 @@ fun JellyfinSectionContent(
                     subtitle = stringResource(R.string.pref_subtitle_language_sub),
                     icon = AbyssIconType.SUBTITLES_CC,
                     valueLabel = trackLanguageLabel(trackPreference.subtitleChoice()),
+                    focusRequester = subtitleRowRequester,
                     onClick = { onOpenTrackPicker(TrackPickerKind.SUBTITLE) }
                 )
             }

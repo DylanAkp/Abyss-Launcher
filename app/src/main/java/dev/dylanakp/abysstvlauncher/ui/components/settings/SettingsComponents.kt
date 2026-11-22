@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +53,7 @@ import dev.dylanakp.abysstvlauncher.model.TRACK_LANGUAGE_CODES
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
 import dev.dylanakp.abysstvlauncher.ui.focus.safeRequestFocus
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 import java.util.Locale
 
 @Composable
@@ -138,8 +138,7 @@ fun SettingsGlassInputField(
                 .clip(RoundedCornerShape(8.dp))
                 .background(if (isFocused || isEditing) Color(0xFF313A47) else Color(0xFF16181D))
                 .padding(horizontal = 14.dp, vertical = 11.dp)
-                .onFocusChanged { isFocused = it.isFocused }
-                .clickable(enabled = !isEditing) { isEditing = true }
+                .tvClickable(onFocused = { isFocused = it }, isBusy = isEditing) { isEditing = true }
                 .onPreviewKeyEvent { event ->
                     if (isEditing || event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) {
                         return@onPreviewKeyEvent false
@@ -237,8 +236,7 @@ fun SettingsPrimaryActionButton(
             }
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) Color(0xFFE8EAED) else Color(0xFF1A73E8))
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { if (!isLoading) onClick() }
+            .tvClickable(onFocused = { isFocused = it }, isBusy = isLoading) { onClick() }
             .padding(vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -294,8 +292,7 @@ fun GoogleTvRadioRow(
                     else -> Color(0xFF181A1F)
                 }
             )
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
+            .tvClickable(onFocused = { isFocused = it }) { onClick() }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -407,8 +404,7 @@ fun GoogleTvSwitchRow(
                     else -> Color(0xFF181A1F)
                 }
             )
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
+            .tvClickable(onFocused = { isFocused = it }) { onClick() }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)

@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,7 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,7 +30,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -50,9 +47,10 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
-import dev.dylanakp.abysstvlauncher.ui.components.AbyssModalOverlay
-import dev.dylanakp.abysstvlauncher.ui.components.RequestModalInitialFocus
-import kotlinx.coroutines.delay
+import dev.dylanakp.abysstvlauncher.ui.components.AbyssModalHost
+import dev.dylanakp.abysstvlauncher.ui.focus.FocusSlotHolder
+import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 
 @Composable
 fun EpisodeContextMenu(
@@ -70,14 +68,11 @@ fun EpisodeContextMenu(
     val initialFocusRequester = remember { FocusRequester() }
     var hasSeenFreshDown by remember(episode.id) { mutableStateOf(false) }
 
-    RequestModalInitialFocus(
-        focusRequester = initialFocusRequester,
-        episode.id
-    )
-
-    AbyssModalOverlay(
-        scrimColor = Color(0xA6000000),
+    AbyssModalHost(
         onDismiss = onDismiss,
+        initialFocusRequester = initialFocusRequester,
+        restoreFocusTo = LocalFocusSlots.current.requester(FocusSlotHolder.FIRST_CONTENT),
+        scrimColor = Color(0xA6000000),
         modifier = Modifier.onPreviewKeyEvent { event ->
             val native = event.nativeKeyEvent
             val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
@@ -220,8 +215,7 @@ private fun EpisodeContextMenuItem(
             }
             .clip(RoundedCornerShape(16.dp))
             .background(bgColor)
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
+            .tvClickable(onFocused = { isFocused = it }, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 13.dp)
     ) {
         Row(

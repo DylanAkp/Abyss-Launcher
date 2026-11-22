@@ -16,7 +16,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
@@ -56,7 +55,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -68,7 +66,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dylanakp.abysstvlauncher.R
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -90,6 +87,10 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.theme.AbyssVoid
 import dev.dylanakp.abysstvlauncher.ui.player.formatDurationMs
+import dev.dylanakp.abysstvlauncher.ui.focus.FocusSlotHolder
+import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
+import dev.dylanakp.abysstvlauncher.ui.focus.safeRequestFocus
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -226,12 +227,11 @@ fun SeriesDetailScreen(
         }
     }
 
-    RequestModalInitialFocus(
-        focusRequester = continueButtonRequester,
-        isLoading,
-        seriesDetails,
-        enabled = !isLoading
-    )
+    LaunchedEffect(seriesItem.id, isLoading) {
+        if (isLoading) return@LaunchedEffect
+        withFrameNanos { }
+        continueButtonRequester.safeRequestFocus()
+    }
 
     Box(
         modifier = modifier
@@ -542,7 +542,7 @@ fun SeriesDetailScreen(
                             modifier = Modifier
                                 .focusProperties {
                                     onEnter = {
-                                        runCatching { selectedSeasonFocusRequester.requestFocus() }
+                                        selectedSeasonFocusRequester.safeRequestFocus()
                                     }
                                 }
                                 .focusGroup(),
@@ -651,14 +651,16 @@ private fun EpisodeVersionPickerDialog(
     val firstRequester = remember { FocusRequester() }
     val selectedId = episode.selectedVersionId ?: episode.versions.firstOrNull()?.id
 
-    RequestModalInitialFocus(
-        focusRequester = firstRequester,
-        episode.id
-    )
+    LaunchedEffect(episode.id) {
+        withFrameNanos { }
+        firstRequester.safeRequestFocus()
+    }
 
-    AbyssModalOverlay(
-        scrimColor = Color(0xA6000000),
-        onDismiss = onDismiss
+    AbyssModalHost(
+        onDismiss = onDismiss,
+        initialFocusRequester = firstRequester,
+        restoreFocusTo = LocalFocusSlots.current.requester(FocusSlotHolder.FIRST_CONTENT),
+        scrimColor = Color(0xA6000000)
     ) {
         Column(
             modifier = Modifier
@@ -719,8 +721,7 @@ private fun EpisodeVersionRow(
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .clip(RoundedCornerShape(16.dp))
             .background(bgColor)
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
+            .tvClickable(onFocused = { isFocused = it }, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically

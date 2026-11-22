@@ -1,6 +1,5 @@
 package dev.dylanakp.abysstvlauncher.ui.components
 
-import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -8,9 +7,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,8 +39,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
@@ -54,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import dev.dylanakp.abysstvlauncher.BuildConfig
 import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.data.AppUpdate
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
 import dev.dylanakp.abysstvlauncher.theme.AbyssSurfaceGlassElevated
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
@@ -73,19 +68,13 @@ fun AppUpdateModal(
 
     val primaryButtonRequester = remember { FocusRequester() }
 
-    RequestModalInitialFocus(
-        focusRequester = primaryButtonRequester,
-        update,
-        isDownloading,
-        errorMessage,
-        enabled = !isDownloading
-    )
-
-    AbyssModalOverlay(
+    AbyssModalHost(
         scrimColor = Color(0xD905060A),
         onDismiss = onDismiss,
         dismissOnBack = !isDownloading,
-        dismissOnScrimClick = !isDownloading
+        dismissOnScrimClick = !isDownloading,
+        initialFocusRequester = primaryButtonRequester,
+        restoreFocusTo = null
     ) {
         Box(
             modifier = Modifier
@@ -261,6 +250,7 @@ private fun UpdateModalButton(
     modifier: Modifier = Modifier
 ) {
     var isFocused by remember { mutableStateOf(false) }
+    val isBusy = !enabled
 
     Box(
         modifier = modifier
@@ -278,19 +268,11 @@ private fun UpdateModalButton(
                     else -> Color(0x18FFFFFF)
                 }
             )
-            .onFocusChanged { isFocused = it.isFocused }
-            .onPreviewKeyEvent { event ->
-                val native = event.nativeKeyEvent
-                val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                        native.keyCode == KeyEvent.KEYCODE_ENTER ||
-                        native.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
-                if (enabled && isSelectKey && native.action == KeyEvent.ACTION_UP) {
-                    onClick()
-                    true
-                } else false
-            }
-            .focusable(enabled = enabled)
-            .clickable(enabled = enabled) { onClick() }
+            .tvClickable(
+                onFocused = { isFocused = it },
+                isBusy = isBusy,
+                onClick = onClick
+            )
             .padding(vertical = 12.dp, horizontal = 16.dp),
         contentAlignment = Alignment.Center
     ) {

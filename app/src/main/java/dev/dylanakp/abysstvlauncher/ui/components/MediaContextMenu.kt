@@ -7,7 +7,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,7 +36,6 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -57,6 +55,9 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
 import dev.dylanakp.abysstvlauncher.theme.AbyssGold
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
+import dev.dylanakp.abysstvlauncher.ui.focus.FocusSlotHolder
+import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 import dev.dylanakp.abysstvlauncher.ui.player.formatDurationMs
 
 @Composable
@@ -80,14 +81,11 @@ fun MediaContextMenu(
     val isWatched = (historyEntry?.progressPercent ?: 0f) >= 0.95f
     val hasContinueProgress = historyEntry != null && historyEntry.positionMs > 0L
 
-    RequestModalInitialFocus(
-        focusRequester = initialFocusRequester,
-        media.id
-    )
-
-    AbyssModalOverlay(
+    AbyssModalHost(
         scrimColor = Color(0xB305070C),
         onDismiss = onDismiss,
+        initialFocusRequester = initialFocusRequester,
+        restoreFocusTo = LocalFocusSlots.current.requester(FocusSlotHolder.FIRST_CONTENT),
         modifier = Modifier.onPreviewKeyEvent { event ->
             val native = event.nativeKeyEvent
             val isSelectKey = native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
@@ -355,8 +353,7 @@ private fun MediaContextMenuItem(
                     else -> Color(0x0EFFFFFF)
                 }
             )
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
+            .tvClickable(onFocused = { isFocused = it }, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 11.dp),
         contentAlignment = Alignment.CenterStart
     ) {

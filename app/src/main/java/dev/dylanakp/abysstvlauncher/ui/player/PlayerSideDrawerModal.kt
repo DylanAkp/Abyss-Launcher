@@ -3,7 +3,6 @@ package dev.dylanakp.abysstvlauncher.ui.player
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,7 +30,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
@@ -46,7 +43,10 @@ import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
-import dev.dylanakp.abysstvlauncher.ui.components.RequestModalInitialFocus
+import dev.dylanakp.abysstvlauncher.ui.components.AbyssModalHost
+import dev.dylanakp.abysstvlauncher.ui.focus.FocusSlotHolder
+import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 
 @Composable
 fun PlayerSideDrawerModal(
@@ -60,96 +60,97 @@ fun PlayerSideDrawerModal(
     val firstItemRequester = remember { FocusRequester() }
     val closeBtnRequester = remember { FocusRequester() }
 
-    RequestModalInitialFocus(
-        focusRequester = firstItemRequester,
-        modalType,
-        enabled = modalType != PlayerModalType.NONE,
-        fallbackRequester = closeBtnRequester
-    )
-
     val headerTitle = when (modalType) {
         PlayerModalType.AUDIO_TRACKS -> stringResource(R.string.audio_tracks_title)
         PlayerModalType.SUBTITLE_TRACKS -> stringResource(R.string.subtitles_title)
         PlayerModalType.NONE -> ""
     }
 
-    Box(
-        modifier = Modifier
-            .width(380.dp)
-            .fillMaxHeight()
-            .padding(16.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xF0141824))
-            .padding(20.dp)
+    AbyssModalHost(
+        onDismiss = onClose,
+        initialFocusRequester = firstItemRequester,
+        scrimColor = Color(0xF0141824),
+        restoreFocusTo = LocalFocusSlots.current.requester(FocusSlotHolder.PLAYER_OSD),
+        contentAlignment = Alignment.CenterEnd
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = headerTitle,
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    ),
-                    color = AbyssTextPrimary
-                )
-                OsdPillButton(
-                    label = "",
-                    icon = AbyssIconType.CLOSE,
-                    focusRequester = closeBtnRequester,
-                    onClick = onClose
-                )
-            }
+        Box(
+            modifier = Modifier
+                .width(380.dp)
+                .fillMaxHeight()
+                .padding(16.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xF0141824))
+                .padding(20.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = headerTitle,
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        ),
+                        color = AbyssTextPrimary
+                    )
+                    OsdPillButton(
+                        label = "",
+                        icon = AbyssIconType.CLOSE,
+                        focusRequester = closeBtnRequester,
+                        onClick = onClose
+                    )
+                }
 
-            Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-            when (modalType) {
-                PlayerModalType.AUDIO_TRACKS -> {
-                    if (audioTracks.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.no_audio_tracks),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = AbyssTextSecondary
-                        )
-                    } else {
-                        val selectedIdx = audioTracks.indexOfFirst { it.isSelected }.coerceAtLeast(0)
+                when (modalType) {
+                    PlayerModalType.AUDIO_TRACKS -> {
+                        if (audioTracks.isEmpty()) {
+                            Text(
+                                text = stringResource(R.string.no_audio_tracks),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = AbyssTextSecondary
+                            )
+                        } else {
+                            val selectedIdx = audioTracks.indexOfFirst { it.isSelected }.coerceAtLeast(0)
+                            LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                contentPadding = PaddingValues(bottom = 16.dp)
+                            ) {
+                                itemsIndexed(audioTracks) { idx, opt ->
+                                    TrackOptionRowItem(
+                                        title = opt.label,
+                                        subtitle = opt.subLabel,
+                                        isSelected = opt.isSelected,
+                                        focusRequester = if (idx == selectedIdx) firstItemRequester else null,
+                                        onClick = { onSelectAudio(opt) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    PlayerModalType.SUBTITLE_TRACKS -> {
+                        val selectedIdx = subtitleTracks.indexOfFirst { it.isSelected }.coerceAtLeast(0)
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(bottom = 16.dp)
                         ) {
-                            itemsIndexed(audioTracks) { idx, opt ->
+                            itemsIndexed(subtitleTracks) { idx, opt ->
                                 TrackOptionRowItem(
                                     title = opt.label,
                                     subtitle = opt.subLabel,
                                     isSelected = opt.isSelected,
                                     focusRequester = if (idx == selectedIdx) firstItemRequester else null,
-                                    onClick = { onSelectAudio(opt) }
+                                    onClick = { onSelectSubtitle(opt) }
                                 )
                             }
                         }
                     }
+                    PlayerModalType.NONE -> Unit
                 }
-                PlayerModalType.SUBTITLE_TRACKS -> {
-                    val selectedIdx = subtitleTracks.indexOfFirst { it.isSelected }.coerceAtLeast(0)
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(bottom = 16.dp)
-                    ) {
-                        itemsIndexed(subtitleTracks) { idx, opt ->
-                            TrackOptionRowItem(
-                                title = opt.label,
-                                subtitle = opt.subLabel,
-                                isSelected = opt.isSelected,
-                                focusRequester = if (idx == selectedIdx) firstItemRequester else null,
-                                onClick = { onSelectSubtitle(opt) }
-                            )
-                        }
-                    }
-                }
-                PlayerModalType.NONE -> Unit
             }
         }
     }
@@ -187,8 +188,7 @@ fun TrackOptionRowItem(
                     else -> Color(0x14FFFFFF)
                 }
             )
-            .onFocusChanged { isFocused = it.isFocused }
-            .clickable { onClick() }
+            .tvClickable(onFocused = { isFocused = it }) { onClick() }
             .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
         Row(

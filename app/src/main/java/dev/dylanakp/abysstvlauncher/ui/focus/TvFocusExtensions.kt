@@ -1,14 +1,28 @@
 package dev.dylanakp.abysstvlauncher.ui.focus
 
 import android.view.KeyEvent
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 
 fun FocusRequester.safeRequestFocus(): Boolean =
     runCatching { requestFocus() }.getOrDefault(false)
+
+/**
+ * Single source of truth for focusable rows: visuals → onFocusChanged → clickable.
+ * Busy state keeps the node focusable and only swallows the click.
+ */
+fun Modifier.tvClickable(
+    onFocused: (Boolean) -> Unit = {},
+    isBusy: Boolean = false,
+    onClick: () -> Unit
+): Modifier = this
+    .onFocusChanged { onFocused(it.isFocused) }
+    .clickable { if (!isBusy) onClick() }
 
 fun Modifier.dpadNavigation(
     up: FocusRequester? = null,
