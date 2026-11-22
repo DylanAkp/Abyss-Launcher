@@ -19,6 +19,7 @@ import dev.dylanakp.abysstvlauncher.model.JellyfinConfig
 import dev.dylanakp.abysstvlauncher.model.PlayerPreference
 import dev.dylanakp.abysstvlauncher.model.SeerConfig
 import dev.dylanakp.abysstvlauncher.model.TemperatureUnit
+import dev.dylanakp.abysstvlauncher.model.TrackPreference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -177,6 +178,18 @@ class LauncherPreferences(private val context: Context) {
             prefs[KEY_JF_SERIES_COUNT] = value.syncedSeriesCount
         }
 
+    var trackPreference: TrackPreference
+        get() = read { TrackPreference.decode(it[KEY_TRACK_PREF]) }
+        set(value) = mutate { it[KEY_TRACK_PREF] = value.encode() }
+
+    fun seriesTrackPreference(seriesId: String): TrackPreference =
+        read { TrackPreference.decode(it[seriesTrackKey(seriesId)]) }
+
+    fun setSeriesTrackPreference(seriesId: String, preference: TrackPreference) =
+        mutate { it[seriesTrackKey(seriesId)] = preference.encode() }
+
+    private fun seriesTrackKey(seriesId: String) = stringPreferencesKey("track_pref_series_$seriesId")
+
     var seerConfig: SeerConfig
         get() = read { prefs ->
             val defaultSrv = BuildConfig.DEFAULT_SEER_SERVER
@@ -288,6 +301,7 @@ class LauncherPreferences(private val context: Context) {
         private val KEY_JF_LAST_SYNC = longPreferencesKey("jf_last_sync")
         private val KEY_JF_MOVIES_COUNT = intPreferencesKey("jf_movies_count")
         private val KEY_JF_SERIES_COUNT = intPreferencesKey("jf_series_count")
+        private val KEY_TRACK_PREF = stringPreferencesKey("track_pref_default")
 
         private val KEY_SEER_SERVER = stringPreferencesKey("seer_server")
         private val KEY_SEER_KEY = stringPreferencesKey("seer_key")

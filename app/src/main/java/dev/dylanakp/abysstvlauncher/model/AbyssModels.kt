@@ -18,6 +18,45 @@ enum class TemperatureUnit(val symbol: String) {
     FAHRENHEIT("°F")
 }
 
+val TRACK_LANGUAGE_CODES = listOf("fr", "en", "es", "de", "it", "ja", "ko", "pt", "ru", "zh")
+
+/** Track preference; null fields inherit from the global default. */
+data class TrackPreference(
+    val audioLanguage: String? = null,
+    val subtitleLanguage: String? = null,
+    val subtitleOff: Boolean? = null,
+    val subtitleForced: Boolean? = null
+) {
+    fun resolveWith(default: TrackPreference): TrackPreference = TrackPreference(
+        audioLanguage = audioLanguage ?: default.audioLanguage,
+        subtitleLanguage = subtitleLanguage ?: default.subtitleLanguage,
+        subtitleOff = subtitleOff ?: default.subtitleOff,
+        subtitleForced = subtitleForced ?: default.subtitleForced
+    )
+
+    fun encode(): String = listOf(
+        audioLanguage.orEmpty(),
+        subtitleLanguage.orEmpty(),
+        subtitleOff.toTri(),
+        subtitleForced.toTri()
+    ).joinToString("|")
+
+    private fun Boolean?.toTri(): String = when (this) {
+        null -> ""
+        true -> "1"
+        false -> "0"
+    }
+
+    companion object {
+        fun decode(raw: String?): TrackPreference {
+            val p = raw.orEmpty().split("|", limit = 4)
+            fun str(i: Int) = p.getOrElse(i) { "" }.ifBlank { null }
+            fun bool(i: Int) = when (p.getOrElse(i) { "" }) { "1" -> true; "0" -> false; else -> null }
+            return TrackPreference(str(0), str(1), bool(2), bool(3))
+        }
+    }
+}
+
 @Serializable
 enum class AbyssNavTab {
     HOME,
