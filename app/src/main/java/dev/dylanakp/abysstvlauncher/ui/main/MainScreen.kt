@@ -235,6 +235,7 @@ fun MainScreen(
     val heroPlayFocusRequester = remember { FocusRequester() }
     val contentFirstFocusRequester = remember { FocusRequester() }
     val searchFirstKeyFocusRequester = remember { FocusRequester() }
+    val settingsNavFocusRequester = remember { FocusRequester() }
     val mainListState = rememberLazyListState()
     val appsGridState = rememberLazyGridState()
 
@@ -310,6 +311,7 @@ fun MainScreen(
 
     val onNavigateDownFromTopBar: () -> Boolean = {
         when {
+            state.isSettingsDrawerOpen -> settingsNavFocusRequester.safeRequestFocus()
             state.isSearchActive -> searchFirstKeyFocusRequester.safeRequestFocus()
             state.selectedTab == AbyssNavTab.HOME && state.activeHeroItem != null -> {
                 heroPlayFocusRequester.safeRequestFocus() || contentFirstFocusRequester.safeRequestFocus()
@@ -473,7 +475,8 @@ fun MainScreen(
             state = state,
             viewModel = viewModel,
             context = context,
-            playMediaItem = playMediaItem
+            playMediaItem = playMediaItem,
+            settingsNavFocusRequester = settingsNavFocusRequester
         )
     }
 }

@@ -92,6 +92,7 @@ private enum class SettingsSection {
 @Composable
 fun SettingsDrawer(
     isOpen: Boolean,
+    navInitialFocusRequester: FocusRequester? = null,
     jellyfinConfig: JellyfinConfig,
     seerConfig: SeerConfig,
     trackPreference: TrackPreference,
@@ -127,7 +128,8 @@ fun SettingsDrawer(
             if (!isOpen) trackPicker = null
         }
 
-        val navJfFocusRequester = remember { FocusRequester() }
+        val fallbackNavJfFocusRequester = remember { FocusRequester() }
+        val navJfFocusRequester = navInitialFocusRequester ?: fallbackNavJfFocusRequester
         val navSeerFocusRequester = remember { FocusRequester() }
         val navAppearanceFocusRequester = remember { FocusRequester() }
         val navRemoteFocusRequester = remember { FocusRequester() }
