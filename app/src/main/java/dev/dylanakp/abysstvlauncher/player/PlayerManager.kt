@@ -14,6 +14,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.util.UnstableApi
@@ -28,6 +29,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.data.LauncherPreferences
+import dev.dylanakp.abysstvlauncher.model.TRACK_LANGUAGE_CODES
+import dev.dylanakp.abysstvlauncher.model.TrackPreference
 import dev.dylanakp.abysstvlauncher.ui.player.PlayerSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,6 +44,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Locale
+
+private val LANG_ALIASES = mapOf(
+    "eng" to "en", "fre" to "fr", "fra" to "fr", "ger" to "de", "deu" to "de",
+    "spa" to "es", "ita" to "it", "por" to "pt", "jpn" to "ja", "kor" to "ko",
+    "rus" to "ru", "zho" to "zh", "chi" to "zh", "nld" to "nl", "dut" to "nl",
+    "ara" to "ar", "hin" to "hi"
+)
 
 data class TrackOption(
     val label: String,
@@ -116,6 +126,10 @@ class PlayerManagerImpl(
 
     private val _currentSession = MutableStateFlow<PlayerSession?>(null)
     override val currentSession: StateFlow<PlayerSession?> = _currentSession.asStateFlow()
+
+    private var currentTrackPreference: TrackPreference? = null
+    private var userSelectedAudio = false
+    private var userSelectedSubtitle = false
 
     override fun setPositionPollingEnabled(enabled: Boolean) {
         isPositionPollingEnabled = enabled
@@ -310,6 +324,7 @@ class PlayerManagerImpl(
                     }
                 }
             }
+            applyTrackPreferences(tracks)
             refreshTracks(tracks)
         }
 
@@ -347,6 +362,12 @@ class PlayerManagerImpl(
 
     override fun prepare(context: Context, session: PlayerSession) {
         _currentSession.value = session
+        userSelectedAudio = false
+        userSelectedSubtitle = false
+        val seriesPref = session.seriesId.takeIf { it.isNotBlank() }
+            ?.let { preferences.seriesTrackPreference(it) }
+            ?: TrackPreference()
+        currentTrackPreference = seriesPref.resolveWith(preferences.trackPreference)
         _state.update {
             it.copy(
                 error = null,
@@ -418,10 +439,11 @@ class PlayerManagerImpl(
         player.trackSelectionParameters = player.trackSelectionParameters
             .buildUpon()
             .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-            .setOverrideForType(
-                androidx.media3.common.TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex))
-            )
+            .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex)))
             .build()
+        userSelectedAudio = true
+        val language = formatLanguageCode(group.getTrackFormat(trackIndex))
+        saveSeriesTrackPreference { it.copy(audioLanguage = language) }
     }
 
     override fun selectSubtitleTrack(group: Tracks.Group?, trackIndex: Int, isOff: Boolean) {
@@ -431,15 +453,28 @@ class PlayerManagerImpl(
                 .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .build()
+            saveSeriesTrackPreference { it.copy(subtitleLanguage = null, subtitleOff = true) }
         } else {
+            val format = group.getTrackFormat(trackIndex)
             player.trackSelectionParameters = player.trackSelectionParameters
                 .buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                .setOverrideForType(
-                    androidx.media3.common.TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex))
-                )
+                .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex)))
                 .build()
+            saveSeriesTrackPreference {
+                it.copy(
+                    subtitleLanguage = formatLanguageCode(format),
+                    subtitleOff = false,
+                    subtitleForced = isForcedSubtitle(format)
+                )
+            }
         }
+        userSelectedSubtitle = true
+    }
+
+    private fun saveSeriesTrackPreference(block: (TrackPreference) -> TrackPreference) {
+        val seriesId = _currentSession.value?.seriesId?.takeIf { it.isNotBlank() } ?: return
+        preferences.setSeriesTrackPreference(seriesId, block(preferences.seriesTrackPreference(seriesId)))
     }
 
     override fun retry(context: Context, session: PlayerSession) {
@@ -515,6 +550,97 @@ class PlayerManagerImpl(
             .build()
         _state.update { PlayerPlaybackState() }
         _currentSession.value = null
+    }
+
+    private fun String?.normalizeCode(): String? {
+        val raw = this?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        if (raw.isBlank() || raw == "und") return null
+        val mapped = LANG_ALIASES[raw] ?: raw
+        return Locale.forLanguageTag(mapped).language.ifBlank { mapped }.lowercase(Locale.ROOT)
+    }
+
+    private fun formatLanguageCode(format: Format): String? {
+        format.language.normalizeCode()?.let { return it }
+        val label = format.label?.lowercase(Locale.ROOT).orEmpty()
+        if (label.isBlank()) return null
+        return TRACK_LANGUAGE_CODES.firstOrNull { code ->
+            val locale = Locale.forLanguageTag(code)
+            listOf(locale.getDisplayLanguage(Locale.getDefault()), locale.getDisplayLanguage(Locale.ENGLISH), code)
+                .any { it.isNotBlank() && label.contains(it.lowercase(Locale.ROOT)) }
+        }
+    }
+
+    private fun languageMatches(format: Format, target: String?): Boolean =
+        target.normalizeCode()?.let { it == formatLanguageCode(format) } ?: false
+
+    private fun isForcedSubtitle(format: Format): Boolean {
+        if (format.selectionFlags and C.SELECTION_FLAG_FORCED != 0) return true
+        val label = format.label.orEmpty().lowercase(Locale.ROOT)
+        return label.contains("forced") || label.contains("forc")
+    }
+
+    private fun findAudioChoice(tracks: Tracks, language: String?): Pair<Tracks.Group, Int>? {
+        if (language.normalizeCode() == null) return null
+        for (group in tracks.groups) {
+            if (group.type != C.TRACK_TYPE_AUDIO) continue
+            for (i in 0 until group.length) {
+                if (group.isTrackSupported(i) && languageMatches(group.getTrackFormat(i), language)) {
+                    return group to i
+                }
+            }
+        }
+        return null
+    }
+
+    private fun findSubtitleChoice(tracks: Tracks, pref: TrackPreference): Pair<Tracks.Group, Int>? {
+        if (pref.subtitleOff == true) return null
+        val wantForced = pref.subtitleForced == true
+        if (!wantForced && pref.subtitleLanguage.normalizeCode() == null) return null
+        for (group in tracks.groups) {
+            if (group.type != C.TRACK_TYPE_TEXT) continue
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i)) continue
+                val format = group.getTrackFormat(i)
+                if (wantForced && !isForcedSubtitle(format)) continue
+                if (!pref.subtitleLanguage.isNullOrBlank() && !languageMatches(format, pref.subtitleLanguage)) continue
+                return group to i
+            }
+        }
+        return null
+    }
+
+    private fun applyTrackPreferences(tracks: Tracks) {
+        val pref = currentTrackPreference ?: return
+        val params = player.trackSelectionParameters
+        val builder = params.buildUpon()
+        var changed = false
+
+        if (!userSelectedAudio) {
+            findAudioChoice(tracks, pref.audioLanguage)?.let { (group, index) ->
+                val override = TrackSelectionOverride(group.mediaTrackGroup, listOf(index))
+                if (params.overrides.values.none { it.type == C.TRACK_TYPE_AUDIO && it == override }) {
+                    builder.setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false).setOverrideForType(override)
+                    changed = true
+                }
+            }
+        }
+        if (!userSelectedSubtitle) {
+            if (pref.subtitleOff == true) {
+                if (!params.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
+                    builder.clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    changed = true
+                }
+            } else {
+                findSubtitleChoice(tracks, pref)?.let { (group, index) ->
+                    val override = TrackSelectionOverride(group.mediaTrackGroup, listOf(index))
+                    if (params.overrides.values.none { it.type == C.TRACK_TYPE_TEXT && it == override }) {
+                        builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).setOverrideForType(override)
+                        changed = true
+                    }
+                }
+            }
+        }
+        if (changed) player.trackSelectionParameters = builder.build()
     }
 
     private fun refreshTracks(tracks: Tracks) {
