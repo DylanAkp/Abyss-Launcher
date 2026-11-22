@@ -69,6 +69,7 @@ fun MainOverlays(
         isOpen = state.isSettingsDrawerOpen,
         jellyfinConfig = state.jellyfinConfig,
         seerConfig = state.seerConfig,
+        trackPreference = state.trackPreference,
         isSyncing = state.isSyncingJellyfin,
         isTestingSeer = state.isTestingSeer,
         currentLanguage = state.language,
@@ -85,6 +86,7 @@ fun MainOverlays(
             viewModel.saveAndTestSeer(srv, key)
         },
         onSelectPlayerPreference = { viewModel.setPlayerPreference(it) },
+        onSelectTrackPreference = { viewModel.setTrackPreference(it) },
         onSelectLanguage = { viewModel.setLanguage(it) },
         onToggleShowHiddenApps = { viewModel.setShowHiddenApps(it) },
         onUpdateWeatherCity = { viewModel.setWeatherCity(it) },

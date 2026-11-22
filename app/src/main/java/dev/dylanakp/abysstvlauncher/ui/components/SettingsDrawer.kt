@@ -68,6 +68,7 @@ import dev.dylanakp.abysstvlauncher.model.TemperatureUnit
 import dev.dylanakp.abysstvlauncher.model.JellyfinConfig
 import dev.dylanakp.abysstvlauncher.model.PlayerPreference
 import dev.dylanakp.abysstvlauncher.model.SeerConfig
+import dev.dylanakp.abysstvlauncher.model.TrackPreference
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
@@ -85,6 +86,7 @@ fun SettingsDrawer(
     isOpen: Boolean,
     jellyfinConfig: JellyfinConfig,
     seerConfig: SeerConfig,
+    trackPreference: TrackPreference,
     isSyncing: Boolean,
     isTestingSeer: Boolean = false,
     currentLanguage: AppLanguage,
@@ -97,6 +99,7 @@ fun SettingsDrawer(
     onSaveAndConnectJellyfin: (String, String, String) -> Unit,
     onSaveAndTestSeer: (String, String) -> Unit,
     onSelectPlayerPreference: (PlayerPreference) -> Unit,
+    onSelectTrackPreference: (TrackPreference) -> Unit,
     onSelectLanguage: (AppLanguage) -> Unit,
     onToggleShowHiddenApps: (Boolean) -> Unit,
     onUpdateWeatherCity: (String) -> Unit = {},
@@ -304,9 +307,11 @@ fun SettingsDrawer(
                             SettingsSection.JELLYFIN -> {
                                 JellyfinSectionContent(
                                     config = jellyfinConfig,
+                                    trackPreference = trackPreference,
                                     isSyncing = isSyncing,
                                     onSaveAndConnect = onSaveAndConnectJellyfin,
-                                    onSelectPlayerPreference = onSelectPlayerPreference
+                                    onSelectPlayerPreference = onSelectPlayerPreference,
+                                    onSelectTrackPreference = onSelectTrackPreference
                                 )
                             }
                             SettingsSection.SEER -> {

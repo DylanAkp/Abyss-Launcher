@@ -41,6 +41,7 @@ import dev.dylanakp.abysstvlauncher.model.PlaybackHistoryEntry
 import dev.dylanakp.abysstvlauncher.model.PlayerPreference
 import dev.dylanakp.abysstvlauncher.model.SeerConfig
 import dev.dylanakp.abysstvlauncher.model.SeerMediaStatus
+import dev.dylanakp.abysstvlauncher.model.TrackPreference
 import dev.dylanakp.abysstvlauncher.ui.viewmodels.LauncherSearchDelegate
 import dev.dylanakp.abysstvlauncher.ui.viewmodels.LauncherUpdateDelegate
 import dev.dylanakp.abysstvlauncher.model.SeriesDetails
@@ -119,6 +120,7 @@ data class LauncherUiState(
     val weatherInfo: WeatherInfo? = null,
     val jellyfinConfig: JellyfinConfig = JellyfinConfig(),
     val seerConfig: SeerConfig = SeerConfig(),
+    val trackPreference: TrackPreference = TrackPreference(),
     val isSyncingJellyfin: Boolean = false,
     val isTestingSeer: Boolean = false,
     val searchQuery: String = "",
@@ -250,6 +252,7 @@ class LauncherViewModel(
                 showHiddenApps = preferences.showHiddenApps,
                 jellyfinConfig = jfConfig,
                 seerConfig = seerConfig,
+                trackPreference = preferences.trackPreference,
                 watchlistIds = preferences.watchlistIds,
                 playbackHistory = history,
                 searchHistory = preferences.searchHistory,
@@ -1665,6 +1668,11 @@ class LauncherViewModel(
         val updated = _uiState.value.jellyfinConfig.copy(playerPreference = pref)
         prefs?.jellyfinConfig = updated
         _uiState.update { it.copy(jellyfinConfig = updated) }
+    }
+
+    fun setTrackPreference(pref: TrackPreference) {
+        prefs?.trackPreference = pref
+        _uiState.update { it.copy(trackPreference = pref) }
     }
 
     fun setShowHiddenApps(show: Boolean) {
