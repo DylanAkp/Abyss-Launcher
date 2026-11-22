@@ -25,6 +25,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,9 +51,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.model.TRACK_LANGUAGE_CODES
-import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIcon
 import dev.dylanakp.abysstvlauncher.ui.components.AbyssIconType
+import dev.dylanakp.abysstvlauncher.ui.focus.safeRequestFocus
 import java.util.Locale
 
 @Composable
@@ -79,7 +80,6 @@ fun SettingsGroup(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color(0xFF1E2025))
-                .border(1.dp, AbyssBorderHairline, RoundedCornerShape(12.dp))
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             content = content
@@ -96,33 +96,76 @@ fun SettingsGlassInputField(
     isPassword: Boolean = false
 ) {
     var isFocused by remember { mutableStateOf(false) }
+    var isEditing by remember { mutableStateOf(false) }
+    val textFieldFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+
+    LaunchedEffect(isEditing) {
+        if (isEditing && !textFieldFocusRequester.safeRequestFocus()) isEditing = false
+    }
 
     Column(
         modifier = Modifier.padding(vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontWeight = FontWeight.Medium,
-                fontSize = 12.sp
-            ),
-            color = Color(0xFF8E918F)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 12.sp
+                ),
+                color = if (isFocused || isEditing) Color(0xFF8AB4F8) else Color(0xFF8E918F)
+            )
+            if (isFocused && !isEditing) {
+                Text(
+                    text = stringResource(R.string.input_hint_ok_edit),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp
+                    ),
+                    color = Color(0xFF1A73E8)
+                )
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
-                .background(if (isFocused) Color(0xFF282D37) else Color(0xFF16181D))
+                .background(if (isFocused || isEditing) Color(0xFF313A47) else Color(0xFF16181D))
                 .padding(horizontal = 14.dp, vertical = 11.dp)
+                .onFocusChanged { isFocused = it.isFocused }
+                .clickable(enabled = !isEditing) { isEditing = true }
+                .onPreviewKeyEvent { event ->
+                    if (isEditing || event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) {
+                        return@onPreviewKeyEvent false
+                    }
+                    when (event.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_NUMPAD_ENTER,
+                        KeyEvent.KEYCODE_DPAD_CENTER -> {
+                            isEditing = true
+                            true
+                        }
+                        else -> false
+                    }
+                }
         ) {
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
+                enabled = isEditing,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .onFocusChanged { isFocused = it.isFocused }
+                    .focusRequester(textFieldFocusRequester)
+                    .onFocusChanged { state ->
+                        isEditing = state.isFocused
+                        if (state.isFocused) isFocused = false
+                    }
                     .onPreviewKeyEvent { event ->
                         if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                             when (event.nativeKeyEvent.keyCode) {
@@ -148,7 +191,7 @@ fun SettingsGlassInputField(
                         Text(
                             text = placeholder,
                             style = TextStyle(
-                                color = Color(0xFF5E6368),
+                                color = if (isFocused || isEditing) Color(0xFF9AA0A6) else Color(0xFF5E6368),
                                 fontSize = 13.sp
                             )
                         )
@@ -168,12 +211,21 @@ fun SettingsPrimaryActionButton(
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    val focusManager = LocalFocusManager.current
+    var restoreFocusAfterLoading by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (isFocused) 1.02f else 1.0f,
         animationSpec = tween(100),
         label = "primaryBtnScale"
     )
+
+    LaunchedEffect(isLoading) {
+        if (isLoading) {
+            restoreFocusAfterLoading = isFocused
+        } else {
+            if (restoreFocusAfterLoading) focusRequester?.safeRequestFocus()
+            restoreFocusAfterLoading = false
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -186,7 +238,7 @@ fun SettingsPrimaryActionButton(
             .clip(RoundedCornerShape(8.dp))
             .background(if (isFocused) Color(0xFFE8EAED) else Color(0xFF1A73E8))
             .onFocusChanged { isFocused = it.isFocused }
-            .clickable(enabled = !isLoading) { onClick() }
+            .clickable { if (!isLoading) onClick() }
             .padding(vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {

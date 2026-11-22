@@ -262,6 +262,7 @@
     <string name="track_lang_auto">Auto</string>
     <string name="track_lang_off">Désactivé</string>
     <string name="track_lang_forced_format">%1$s (Forcé)</string>
+    <string name="input_hint_ok_edit">OK pour modifier</string>
 
     <!-- Options Langue & Météo -->
     <string name="lang_auto_subtitle">Suit automatiquement la langue de votre système TV</string>

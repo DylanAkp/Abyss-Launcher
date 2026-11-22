@@ -262,6 +262,7 @@
     <string name="track_lang_auto">Auto</string>
     <string name="track_lang_off">Off</string>
     <string name="track_lang_forced_format">%1$s (Forced)</string>
+    <string name="input_hint_ok_edit">OK to edit</string>
 
     <!-- Language & Weather Options -->
     <string name="lang_auto_subtitle">Matches your TV system language</string>
