@@ -15,6 +15,13 @@ data class PairResponse(
     val deviceName: String
 )
 
+sealed interface PairResult {
+    data class Success(val response: PairResponse) : PairResult
+    data class Failure(val reason: Reason, val retryAfterMs: Long = 0L) : PairResult
+
+    enum class Reason { INVALID_PIN, RATE_LIMITED, PIN_EXPIRED }
+}
+
 @Serializable
 data class KeyCommand(
     val key: String,

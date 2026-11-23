@@ -106,6 +106,7 @@ import java.util.Locale
 data class PlayerSession(
     val mediaItem: MediaItem,
     val streamUrl: String,
+    val rawStreamUrl: String = streamUrl,
     val title: String,
     val subtitle: String = "",
     val startPositionMs: Long = 0L,
@@ -169,6 +170,17 @@ fun AbyssPlayerScreen(
     val resumeButtonFocusRequester = remember { FocusRequester() }
     val retryButtonFocusRequester = remember { FocusRequester() }
 
+    var lastReportNanos by remember { mutableLongStateOf(Long.MIN_VALUE) }
+    val activeSessionId = session.streamUrl
+
+    fun reportProgress(posMs: Long, durMs: Long, isPaused: Boolean, target: PlayerSession = session) {
+        if (durMs <= 0L || posMs < 0L || target.streamUrl != activeSessionId) return
+        val now = System.nanoTime()
+        if (now <= lastReportNanos) return
+        lastReportNanos = maxOf(now, lastReportNanos + 1L)
+        onProgressUpdate(posMs, durMs, isPaused, target)
+    }
+
     LaunchedEffect(session.streamUrl) {
         playerManager.prepare(context, session)
         lastInteractionTick = System.currentTimeMillis()
@@ -182,7 +194,7 @@ fun AbyssPlayerScreen(
             hasHandledCompletion = true
             val dur = playerState.durationMs
             if (dur > 0L) {
-                onProgressUpdate(dur, dur, false, session)
+                reportProgress(dur, dur, false)
             }
             onPlayNextEpisode(session.nextEpisode)
         }
@@ -194,7 +206,7 @@ fun AbyssPlayerScreen(
             val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
             val dur = exoPlayer.duration.coerceAtLeast(0L)
             if (dur > 0L) {
-                onProgressUpdate(pos, dur, true, capturedSession)
+                reportProgress(pos, dur, true, capturedSession)
             }
             playerManager.release()
         }
@@ -236,14 +248,14 @@ fun AbyssPlayerScreen(
                 val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
                 val dur = exoPlayer.duration.coerceAtLeast(0L)
                 if (dur > 0L && pos > 0L) {
-                    onProgressUpdate(pos, dur, false, session)
+                    reportProgress(pos, dur, false)
                 }
             }
         } else if (exoPlayer.playbackState == androidx.media3.common.Player.STATE_READY) {
             val pos = exoPlayer.currentPosition.coerceAtLeast(0L)
             val dur = exoPlayer.duration.coerceAtLeast(0L)
             if (dur > 0L && pos > 0L) {
-                onProgressUpdate(pos, dur, true, session)
+                reportProgress(pos, dur, true)
             }
         }
     }
@@ -576,7 +588,7 @@ fun AbyssPlayerScreen(
                     lastInteractionTick = System.currentTimeMillis()
                 },
                 onPlayNextEpisode = { nextEp ->
-                    onProgressUpdate(exoPlayer.currentPosition.coerceAtLeast(0L), durationMs, true, session)
+                    reportProgress(exoPlayer.currentPosition.coerceAtLeast(0L), durationMs, true)
                     onPlayNextEpisode(nextEp)
                 },
                 onOpenAudioTracks = {

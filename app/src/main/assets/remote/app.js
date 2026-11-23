@@ -1,5 +1,7 @@
 const TOKEN_KEY = "abyss_remote_token";
 let token = localStorage.getItem(TOKEN_KEY) || "";
+let assetTicket = "";
+let assetTicketExpiresAt = 0;
 let eventSource = null;
 let lastState = null;
 
@@ -29,12 +31,27 @@ async function api(path, body) {
     body: body !== undefined ? JSON.stringify(body) : undefined
   });
   if (res.status === 401) {
-    localStorage.removeItem(TOKEN_KEY);
-    token = "";
-    showPair();
+    clearToken();
     throw new Error("Unauthorized");
   }
   return res;
+}
+
+function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+  token = "";
+  assetTicket = "";
+  assetTicketExpiresAt = 0;
+  showPair();
+}
+
+async function getAssetTicket() {
+  if (assetTicket && Date.now() < assetTicketExpiresAt) return assetTicket;
+  const res = await api("/api/ticket");
+  const data = await res.json();
+  assetTicket = data.ticket;
+  assetTicketExpiresAt = Date.now() + 45000;
+  return assetTicket;
 }
 
 async function pair(pin) {
@@ -52,6 +69,8 @@ async function pair(pin) {
     const data = await res.json();
     token = data.token;
     localStorage.setItem(TOKEN_KEY, token);
+    assetTicket = "";
+    assetTicketExpiresAt = 0;
     showRemote();
     return true;
   } catch {
@@ -62,6 +81,8 @@ async function pair(pin) {
 
 function showPair() {
   if (eventSource) { eventSource.close(); eventSource = null; }
+  assetTicket = "";
+  assetTicketExpiresAt = 0;
   pairScreen.classList.remove("hidden");
   remoteScreen.classList.add("hidden");
 }
@@ -73,22 +94,36 @@ function showRemote() {
   api("/api/state").then(r => r.json()).then(renderState).catch(() => {});
 }
 
-function connectSse() {
+async function connectSse() {
   if (!token) return;
-  if (eventSource) eventSource.close();
+  if (eventSource) { eventSource.close(); eventSource = null; }
   connDot.classList.remove("online");
   connLabel.textContent = "Connecting";
-  eventSource = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
-  eventSource.onopen = () => {
+  let ticket;
+  try { ticket = await getAssetTicket(); } catch { return; }
+  if (!token) return;
+  const es = new EventSource(`/api/events?ticket=${encodeURIComponent(ticket)}`);
+  eventSource = es;
+  es.onopen = () => {
     connDot.classList.add("online");
     connLabel.textContent = "Connected";
   };
-  eventSource.onmessage = (e) => {
+  es.onmessage = (e) => {
     try { renderState(JSON.parse(e.data)); } catch {}
   };
-  eventSource.onerror = () => {
+  es.onerror = async () => {
+    if (eventSource !== es) return;
     connDot.classList.remove("online");
     connLabel.textContent = "Reconnecting";
+    try {
+      const res = await fetch("/api/state", { headers: { "X-Remote-Token": token } });
+      if (res.status === 401) { clearToken(); return; }
+      assetTicket = "";
+      assetTicketExpiresAt = 0;
+      es.close();
+      eventSource = null;
+      setTimeout(connectSse, 600);
+    } catch {}
   };
 }
 
@@ -252,7 +287,9 @@ function renderApps(filter = "") {
     const img = document.createElement("img");
     img.className = "m3-app-icon";
     img.loading = "lazy";
-    img.src = `/api/app-icon/${encodeURIComponent(a.packageName)}?token=${encodeURIComponent(token)}`;
+    getAssetTicket().then(t => {
+      img.src = `/api/app-icon/${encodeURIComponent(a.packageName)}?ticket=${encodeURIComponent(t)}`;
+    }).catch(() => {});
     img.alt = "";
     const name = document.createElement("span");
     name.className = "m3-app-name";

@@ -5,6 +5,8 @@ import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -19,6 +21,7 @@ import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -113,6 +116,15 @@ class PlayerManagerImpl(
             .setReadTimeoutMs(20_000)
     }
 
+    private val sanitizingDataSourceFactory: ResolvingDataSource.Factory by lazy {
+        ResolvingDataSource.Factory(httpDataSourceFactory) { spec ->
+            val clean = spec.uri.toString()
+                .replace(Regex("([?&])api_key=[^&]*&?"), "$1")
+                .trimEnd('&', '?')
+            spec.withUri(android.net.Uri.parse(clean))
+        }
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var progressPollJob: Job? = null
     private var isPositionPollingEnabled = true
@@ -176,12 +188,19 @@ class PlayerManagerImpl(
     }
 
     private var isPlayerCreated = false
+    private var audioDeviceCallback: AudioDeviceCallback? = null
+    private var registeredAudioManager: AudioManager? = null
 
     init {
         isBluetoothOrHeadsetConnected = queryBluetoothOrHeadsetConnected()
         android.util.Log.w("AbyssAudio", "init btOrHeadset=$isBluetoothOrHeadsetConnected")
-        val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        audioManager?.registerAudioDeviceCallback(object : AudioDeviceCallback() {
+        registerAudioDeviceCallback()
+    }
+
+    private fun registerAudioDeviceCallback() {
+        if (audioDeviceCallback != null) return
+        val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        val callback = object : AudioDeviceCallback() {
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
                 isBluetoothOrHeadsetConnected = queryBluetoothOrHeadsetConnected()
                 if (isPlayerCreated) scope.launch(Dispatchers.Main) { updateAudioRouting() }
@@ -191,7 +210,10 @@ class PlayerManagerImpl(
                 isBluetoothOrHeadsetConnected = queryBluetoothOrHeadsetConnected()
                 if (isPlayerCreated) scope.launch(Dispatchers.Main) { updateAudioRouting() }
             }
-        }, null)
+        }
+        audioManager.registerAudioDeviceCallback(callback, Handler(Looper.getMainLooper()))
+        audioDeviceCallback = callback
+        registeredAudioManager = audioManager
     }
 
     private fun stereoDownmixMatrix(inCh: Int): ChannelMixingMatrix {
@@ -273,7 +295,7 @@ class PlayerManagerImpl(
             .build()
 
         ExoPlayer.Builder(appContext, renderersFactory)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(appContext).setDataSourceFactory(httpDataSourceFactory))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(appContext).setDataSourceFactory(sanitizingDataSourceFactory))
             .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
@@ -361,6 +383,7 @@ class PlayerManagerImpl(
     }
 
     override fun prepare(context: Context, session: PlayerSession) {
+        registerAudioDeviceCallback()
         _currentSession.value = session
         userSelectedAudio = false
         userSelectedSubtitle = false
@@ -390,10 +413,7 @@ class PlayerManagerImpl(
         httpDataSourceFactory.setDefaultRequestProperties(
             if (token.isNotBlank()) mapOf("X-Emby-Token" to token) else emptyMap()
         )
-        val cleanUri = session.streamUrl
-            .replace(Regex("([?&])api_key=[^&]*&?"), "$1")
-            .trimEnd('&', '?')
-        val item = ExoMediaItem.fromUri(cleanUri)
+        val item = ExoMediaItem.fromUri(session.rawStreamUrl)
         player.setMediaItem(item)
 
         if (session.startPositionMs > 0L) {
@@ -536,6 +556,13 @@ class PlayerManagerImpl(
 
     override fun release() {
         stopProgressPolling()
+        val manager = registeredAudioManager
+        val callback = audioDeviceCallback
+        if (manager != null && callback != null) {
+            runCatching { manager.unregisterAudioDeviceCallback(callback) }
+        }
+        audioDeviceCallback = null
+        registeredAudioManager = null
         mediaSession?.let {
             it.isActive = false
             it.release()

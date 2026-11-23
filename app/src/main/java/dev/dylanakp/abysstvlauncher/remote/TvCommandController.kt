@@ -1,7 +1,6 @@
 package dev.dylanakp.abysstvlauncher.remote
 
 import android.app.Activity
-import android.app.Instrumentation
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -29,7 +28,6 @@ import dev.dylanakp.abysstvlauncher.player.PlayerManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -37,6 +35,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
@@ -46,6 +46,7 @@ import java.net.NetworkInterface
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 class TvCommandController(
     private val context: Context,
@@ -58,14 +59,19 @@ class TvCommandController(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val activeSseClients = AtomicInteger(0)
-    private val failedPairAttempts = AtomicInteger(0)
-    private val instrumentation = Instrumentation()
+    private var pinIssuedAtMs = System.currentTimeMillis()
+    private var pairLockedUntilMs = 0L
+    private var pairFailures = 0
     private val iconCache = android.util.LruCache<String, ByteArray>(64)
     private val mediaById = android.util.LruCache<String, MediaItem>(500)
     private val keyChannel = kotlinx.coroutines.channels.Channel<Pair<String, Boolean>>(32)
 
+    private val pendingPlayMedia = AtomicReference<MediaItem?>(null)
     private val _playMediaRequests = MutableSharedFlow<MediaItem>(extraBufferCapacity = 4)
-    val playMediaRequests: SharedFlow<MediaItem> = _playMediaRequests.asSharedFlow()
+    val playMediaRequests: kotlinx.coroutines.flow.Flow<MediaItem> = flow {
+        pendingPlayMedia.getAndSet(null)?.let { emit(it) }
+        emitAll(_playMediaRequests.asSharedFlow())
+    }
 
     private val _nextEpisodeRequests = MutableSharedFlow<SeriesEpisode>(extraBufferCapacity = 2)
     val nextEpisodeRequests: SharedFlow<SeriesEpisode> = _nextEpisodeRequests.asSharedFlow()
@@ -83,6 +89,7 @@ class TvCommandController(
     val tvStateFlow: StateFlow<TvRemoteState> = _tvStateFlow.asStateFlow()
 
     init {
+        pinIssuedAtMs = preferences.remotePinIssuedAt.takeIf { it > 0L } ?: System.currentTimeMillis()
         val pkgFilter = IntentFilter().apply {
             addAction(Intent.ACTION_PACKAGE_ADDED)
             addAction(Intent.ACTION_PACKAGE_REMOVED)
@@ -131,12 +138,25 @@ class TvCommandController(
         }
     }
 
-    fun getPairingPin(): String = preferences.remotePairingPin
+    fun getPairingPin(): String {
+        if (isPinExpired()) regeneratePin()
+        return preferences.remotePairingPin
+    }
+
+    fun providePinIssuedAt(epochMs: Long) {
+        pinIssuedAtMs = epochMs
+    }
+
+    private fun isPinExpired(): Boolean =
+        System.currentTimeMillis() - pinIssuedAtMs > RemotePairingAndKeyHelper.PIN_TTL_MS
 
     fun regeneratePin(): String {
         val next = RemotePairingAndKeyHelper.generatePin()
         preferences.remotePairingPin = next
-        failedPairAttempts.set(0)
+        pinIssuedAtMs = System.currentTimeMillis()
+        preferences.remotePinIssuedAt = pinIssuedAtMs
+        pairFailures = 0
+        pairLockedUntilMs = 0L
         return next
     }
 
@@ -148,7 +168,17 @@ class TvCommandController(
         refreshState()
     }
 
-    fun pair(pin: String?, token: String?, deviceName: String?): PairResponse? {
+    fun pair(pin: String?, token: String?, deviceName: String?): PairResult {
+        val now = System.currentTimeMillis()
+        if (now < pairLockedUntilMs) {
+            return PairResult.Failure(PairResult.Reason.RATE_LIMITED, pairLockedUntilMs - now)
+        }
+        val rePairing = RemotePairingAndKeyHelper.isTokenValid(preferences.remotePairedTokens, token)
+        if (!rePairing && isPinExpired()) {
+            regeneratePin()
+            refreshState()
+            return PairResult.Failure(PairResult.Reason.PIN_EXPIRED)
+        }
         val outcome = RemotePairingAndKeyHelper.pair(
             expectedPin = preferences.remotePairingPin,
             pairedTokens = preferences.remotePairedTokens,
@@ -157,18 +187,20 @@ class TvCommandController(
             deviceName = deviceName
         )
         if (outcome == null) {
-            if (failedPairAttempts.incrementAndGet() >= 5) {
+            pairFailures++
+            if (pairFailures >= RemotePairingAndKeyHelper.MAX_PAIR_FAILURES) {
                 regeneratePin()
+                pairLockedUntilMs = Long.MAX_VALUE
                 refreshState()
             }
-            return null
+            return PairResult.Failure(PairResult.Reason.INVALID_PIN)
         }
-        failedPairAttempts.set(0)
+        pairFailures = 0
         if (outcome.updatedTokens != preferences.remotePairedTokens) {
             preferences.remotePairedTokens = outcome.updatedTokens
         }
         refreshState()
-        return outcome.response
+        return PairResult.Success(outcome.response)
     }
 
     fun isTokenValid(token: String?): Boolean =
@@ -185,11 +217,6 @@ class TvCommandController(
     }
 
     fun refreshState() {
-        scope.launch {
-            for ((key, longPress) in keyChannel) {
-                dispatchKeyInternal(key, longPress)
-            }
-        }
         scope.launch {
             refreshStateInternal()
         }
@@ -270,48 +297,31 @@ class TvCommandController(
                 }
             }
             else -> {
+                val keyName = key.uppercase()
+                if (RemoteAccessibilityService.instance?.performGlobalKey(keyName) == true) return
                 val keyCode = RemotePairingAndKeyHelper.resolveKeyCode(key) ?: return
-                val activity = foregroundActivity?.get()
-                if (activity != null && !activity.isFinishing) {
-                    scope.launch {
-                        runCatching {
-                            instrumentation.setInTouchMode(false)
-                            if (longPress) {
-                                val downTime = SystemClock.uptimeMillis()
-                                instrumentation.sendKeySync(KeyEvent(downTime, downTime, KeyEvent.ACTION_DOWN, keyCode, 0))
-                                delay(120L)
-                                instrumentation.sendKeySync(KeyEvent(downTime, downTime + 120L, KeyEvent.ACTION_DOWN, keyCode, 1))
-                                delay(520L)
-                                instrumentation.sendKeySync(KeyEvent(downTime, downTime + 640L, KeyEvent.ACTION_UP, keyCode, 0))
-                            } else {
-                                instrumentation.sendKeyDownUpSync(keyCode)
-                            }
-                        }.onFailure {
-                            activity.runOnUiThread {
-                                val targetView = resolveTargetRootView(activity) ?: return@runOnUiThread
-                                if (!targetView.hasFocus()) {
-                                    runCatching { targetView.requestFocus() }
-                                }
-                                val now = SystemClock.uptimeMillis()
-                                if (longPress) {
-                                    targetView.dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0))
-                                    targetView.postDelayed({
-                                        targetView.dispatchKeyEvent(KeyEvent(now, now + 120L, KeyEvent.ACTION_DOWN, keyCode, 1))
-                                    }, 120L)
-                                    targetView.postDelayed({
-                                        targetView.dispatchKeyEvent(KeyEvent(now, now + 640L, KeyEvent.ACTION_UP, keyCode, 0))
-                                    }, 640L)
-                                } else {
-                                    targetView.dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0))
-                                    targetView.dispatchKeyEvent(KeyEvent(now + 15, now + 15, KeyEvent.ACTION_UP, keyCode, 0))
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    RemoteAccessibilityService.instance?.performGlobalKey(key.uppercase())
-                }
+                val activity = foregroundActivity?.get() ?: return
+                if (activity.isFinishing) return
+                activity.runOnUiThread { dispatchKeyToView(activity, keyCode, longPress) }
             }
+        }
+    }
+
+    private fun dispatchKeyToView(activity: Activity, keyCode: Int, longPress: Boolean) {
+        val targetView = resolveTargetRootView(activity) ?: return
+        if (!targetView.hasFocus()) runCatching { targetView.requestFocus() }
+        val now = SystemClock.uptimeMillis()
+        if (longPress) {
+            targetView.dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0))
+            targetView.postDelayed({
+                targetView.dispatchKeyEvent(KeyEvent(now, now + 120L, KeyEvent.ACTION_DOWN, keyCode, 1))
+            }, 120L)
+            targetView.postDelayed({
+                targetView.dispatchKeyEvent(KeyEvent(now, now + 640L, KeyEvent.ACTION_UP, keyCode, 0))
+            }, 640L)
+        } else {
+            targetView.dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0))
+            targetView.dispatchKeyEvent(KeyEvent(now + 15, now + 15, KeyEvent.ACTION_UP, keyCode, 0))
         }
     }
 
@@ -372,13 +382,31 @@ class TvCommandController(
             }
             return
         }
-        val controller = RemoteMediaListenerService.instance?.getActiveController() ?: return
+        val controller = RemoteMediaListenerService.instance?.getActiveController()
+        if (controller == null) {
+            val direction = deltaMs ?: (positionMs?.let { it - (RemoteMediaListenerService.externalMedia.value?.positionMs ?: 0L) })
+            if (direction != null && direction != 0L) {
+                dispatchMediaKey(
+                    if (direction > 0L) KeyEvent.KEYCODE_MEDIA_FAST_FORWARD else KeyEvent.KEYCODE_MEDIA_REWIND
+                )
+            }
+            return
+        }
         val target = when {
             positionMs != null -> positionMs.coerceAtLeast(0L)
             deltaMs != null -> ((controller.playbackState?.position ?: 0L) + deltaMs).coerceAtLeast(0L)
             else -> return
         }
-        controller.transportControls.seekTo(target)
+        if ((controller.playbackState?.actions ?: 0L) and android.media.session.PlaybackState.ACTION_SEEK_TO != 0L) {
+            controller.transportControls.seekTo(target)
+        } else {
+            val direction = deltaMs ?: (target - (controller.playbackState?.position ?: 0L))
+            if (direction != 0L) {
+                dispatchMediaKey(
+                    if (direction > 0L) KeyEvent.KEYCODE_MEDIA_FAST_FORWARD else KeyEvent.KEYCODE_MEDIA_REWIND
+                )
+            }
+        }
     }
 
     fun launchTarget(packageName: String): Boolean {
@@ -440,10 +468,14 @@ class TvCommandController(
             }
             runCatching { context.startActivity(intent) }
         }
-        return _playMediaRequests.tryEmit(item)
+        val emitted = _playMediaRequests.tryEmit(item)
+        if (!emitted || _playMediaRequests.subscriptionCount.value == 0) {
+            pendingPlayMedia.set(item)
+        }
+        return true
     }
 
-    private fun MediaItem.toRemoteMedia(): RemoteMediaItem {
+    private suspend fun MediaItem.toRemoteMedia(): RemoteMediaItem {
         mediaById.put(id, this)
         val pct = (historyRepo.getProgressPercent(id) * 100f).toInt().coerceIn(0, 100)
         return RemoteMediaItem(
@@ -475,12 +507,7 @@ class TvCommandController(
     private fun handleMediaNext() {
         val session = playerManager.currentSession.value
         if (session != null) {
-            val nextEp = session.nextEpisode
-            if (nextEp != null) {
-                _nextEpisodeRequests.tryEmit(nextEp)
-            } else {
-                scope.launch(Dispatchers.Main) { playerManager.seekBy(30_000L) }
-            }
+            session.nextEpisode?.let { _nextEpisodeRequests.tryEmit(it) }
             return
         }
         val controller = RemoteMediaListenerService.instance?.getActiveController()

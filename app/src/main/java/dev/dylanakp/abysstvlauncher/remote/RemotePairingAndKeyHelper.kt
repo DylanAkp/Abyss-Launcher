@@ -8,6 +8,9 @@ internal object RemotePairingAndKeyHelper {
 
     private val secureRandom = SecureRandom()
 
+    const val PIN_TTL_MS = 15 * 60 * 1000L
+    const val MAX_PAIR_FAILURES = 5
+
     fun generatePin(): String = (100000 + secureRandom.nextInt(900000)).toString()
 
     fun generateToken(): String = ByteArray(32)

@@ -12,18 +12,24 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import dev.dylanakp.abysstvlauncher.MainActivity
 import dev.dylanakp.abysstvlauncher.R
+import dev.dylanakp.abysstvlauncher.data.LauncherPreferences
 import org.koin.android.ext.android.inject
 
 class RemoteBridgeService : Service() {
 
     private val httpServer: RemoteHttpServer by inject()
     private val controller: TvCommandController by inject()
+    private val preferences: LauncherPreferences by inject()
 
     private var nsdManager: NsdManager? = null
     private var registrationListener: NsdManager.RegistrationListener? = null
+    private var configuredMdnsName = DEFAULT_MDNS_NAME
+    private var mdnsName = DEFAULT_MDNS_NAME
+    private var registrationAttempts = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -39,14 +45,22 @@ class RemoteBridgeService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
         httpServer.start(TvCommandController.DEFAULT_PORT)
-        registerMdns(TvCommandController.DEFAULT_PORT)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!preferences.remoteServerEnabled) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        configuredMdnsName = intent?.getStringExtra(EXTRA_SERVICE_NAME)
+            ?.takeIf { it.isNotBlank() } ?: DEFAULT_MDNS_NAME
+        mdnsName = configuredMdnsName
         if (!httpServer.isRunning) {
             httpServer.start(TvCommandController.DEFAULT_PORT)
         }
-        return START_STICKY
+        unregisterMdns()
+        registerMdns(TvCommandController.DEFAULT_PORT)
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -62,24 +76,49 @@ class RemoteBridgeService : Service() {
             val mgr = getSystemService(Context.NSD_SERVICE) as NsdManager
             nsdManager = mgr
             val info = NsdServiceInfo().apply {
-                serviceName = "abyss-tv"
+                serviceName = mdnsName
                 serviceType = "_http._tcp."
                 setPort(port)
             }
             val listener = object : NsdManager.RegistrationListener {
-                override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {}
-                override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {}
-                override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {}
-                override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {}
+                override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                    val actual = serviceInfo.serviceName
+                    if (!actual.equals(mdnsName, ignoreCase = true)) {
+                        Log.w(TAG, "mDNS name conflict requested=$mdnsName actual=$actual")
+                        if (registrationAttempts < MAX_MDNS_RENAMES) {
+                            registrationAttempts++
+                            mdnsName = "$configuredMdnsName-$registrationAttempts"
+                            unregisterMdns()
+                            registerMdns(port)
+                        }
+                    } else {
+                        Log.i(TAG, "mDNS registered as $actual on port ${serviceInfo.port}")
+                    }
+                }
+
+                override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                    Log.w(TAG, "mDNS registration failed code=$errorCode name=$mdnsName")
+                }
+
+                override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
+                    Log.i(TAG, "mDNS unregistered ${serviceInfo.serviceName}")
+                }
+
+                override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                    Log.w(TAG, "mDNS unregistration failed code=$errorCode name=${serviceInfo.serviceName}")
+                }
             }
             registrationListener = listener
             mgr.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener)
+        }.onFailure {
+            Log.w(TAG, "mDNS registration error", it)
         }
     }
 
     private fun unregisterMdns() {
         val listener = registrationListener ?: return
         runCatching { nsdManager?.unregisterService(listener) }
+            .onFailure { Log.w(TAG, "mDNS unregister error", it) }
         registrationListener = null
     }
 
@@ -115,11 +154,16 @@ class RemoteBridgeService : Service() {
     }
 
     companion object {
+        private const val TAG = "RemoteBridge"
         private const val CHANNEL_ID = "abyss_remote_bridge"
         private const val NOTIFICATION_ID = 5400
+        private const val DEFAULT_MDNS_NAME = "abyss-tv"
+        private const val MAX_MDNS_RENAMES = 2
+        const val EXTRA_SERVICE_NAME = "dev.dylanakp.abysstvlauncher.remote.MDNS_NAME"
 
-        fun start(context: Context) {
+        fun start(context: Context, serviceName: String? = null) {
             val intent = Intent(context, RemoteBridgeService::class.java)
+            if (!serviceName.isNullOrBlank()) intent.putExtra(EXTRA_SERVICE_NAME, serviceName)
             context.startForegroundService(intent)
         }
 

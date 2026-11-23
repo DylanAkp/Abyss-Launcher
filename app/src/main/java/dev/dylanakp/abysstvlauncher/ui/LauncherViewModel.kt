@@ -13,16 +13,19 @@ import dev.dylanakp.abysstvlauncher.BuildConfig
 import dev.dylanakp.abysstvlauncher.data.AppRepository
 import dev.dylanakp.abysstvlauncher.data.AppUpdate
 import dev.dylanakp.abysstvlauncher.data.AppUpdateRepository
+import dev.dylanakp.abysstvlauncher.data.JellyfinLibraryFetchFailedException
 import dev.dylanakp.abysstvlauncher.data.JellyfinPlaystateCommand
 import dev.dylanakp.abysstvlauncher.data.JellyfinPlaystateEvent
 import dev.dylanakp.abysstvlauncher.data.JellyfinRepository
 import dev.dylanakp.abysstvlauncher.data.JellyfinWebSocketClient
 import dev.dylanakp.abysstvlauncher.player.PlayerManager
 import androidx.annotation.StringRes
-import androidx.appcompat.app.AppCompatDelegate
-import androidx.core.os.LocaleListCompat
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.data.LauncherPreferences
+import dev.dylanakp.abysstvlauncher.data.LibrarySyncResult
+import dev.dylanakp.abysstvlauncher.data.launcherDataStore
 import dev.dylanakp.abysstvlauncher.data.MediaLibraryCache
 import dev.dylanakp.abysstvlauncher.data.PlaybackHistoryRepository
 import dev.dylanakp.abysstvlauncher.data.SeerRepository
@@ -54,14 +57,16 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 @Immutable
@@ -161,6 +166,16 @@ class LauncherViewModel(
     private val _uiState = MutableStateFlow(LauncherUiState())
     val uiState: StateFlow<LauncherUiState> = _uiState.asStateFlow()
 
+    private val libraryUpdateMutex = Mutex()
+    private var rawJellyfinResumeItems: List<MediaItem> = emptyList()
+    @Volatile
+    private var preferredSeriesVersionIds: Map<String, String> = emptyMap()
+    private var movieDetailsJob: Job? = null
+    private var seriesDetailsJob: Job? = null
+    private var progressSessionId = ""
+    @Volatile
+    private var lastProgressPositionMs = 0L
+
     private val searchDelegate: LauncherSearchDelegate by lazy {
         LauncherSearchDelegate(viewModelScope, _uiState) { prefs }
     }
@@ -170,6 +185,11 @@ class LauncherViewModel(
         }
     }
 
+    companion object {
+        private const val TRAILER_ID_PREFIX = "trailer_"
+        private const val SERIES_VERSION_KEY_PREFIX = "series_version_"
+        private const val WATCH_BATCH_SIZE = 8
+    }
 
     fun initialize(context: Context) {
         if (isInitialized) return
@@ -193,9 +213,7 @@ class LauncherViewModel(
             preferences.awaitLoaded()
 
             val lang = preferences.language
-            withContext(Dispatchers.Main) {
-                applyLanguage(lang)
-            }
+            preferredSeriesVersionIds = loadSeriesVersionIds()
 
             val wCity = preferences.weatherCity
             val tUnit = preferences.temperatureUnit
@@ -262,16 +280,13 @@ class LauncherViewModel(
                 seerRequests = cached?.seerRequests.orEmpty()
             )
 
-            withContext(Dispatchers.Default) {
-                _uiState.update {
-                    recomputeDerivedState(
-                        current = baseState,
-                        movies = enrichedMovies.ifEmpty { baseState.movies },
-                        series = enrichedSeries.ifEmpty { baseState.series },
-                        tmdbTrending = cached?.tmdbTrending ?: baseState.tmdbTrending,
-                        playbackHistory = history
-                    )
-                }
+            updateLibraryState {
+                baseState.copy(
+                    movies = enrichedMovies.ifEmpty { baseState.movies },
+                    series = enrichedSeries.ifEmpty { baseState.series },
+                    tmdbTrending = cached?.tmdbTrending ?: baseState.tmdbTrending,
+                    playbackHistory = history
+                )
             }
 
             // 2. Auto-sync Jellyfin library if configured
@@ -295,20 +310,80 @@ class LauncherViewModel(
                         val currentMovies = _uiState.value.movies
                         val currentSeries = _uiState.value.series
                         val enrichedTrending = TmdbRepository.enrichWithJellyfinStreams(trending, currentMovies, currentSeries)
-                        withContext(Dispatchers.Default) {
-                            _uiState.update { current ->
-                                recomputeDerivedState(
-                                    current = current,
-                                    tmdbTrending = enrichedTrending
-                                )
-                            }
-                        }
+                        updateLibraryState { it.copy(tmdbTrending = enrichedTrending) }
                     }
                 } catch (_: Exception) {}
             }
 
             // 5. Check for app updates on boot
             checkForUpdates(silent = true)
+        }
+    }
+
+    private suspend fun updateLibraryState(transform: (LauncherUiState) -> LauncherUiState) {
+        withContext(Dispatchers.Default) {
+            libraryUpdateMutex.withLock {
+                _uiState.update { current -> recomputeDerivedState(transform(current)) }
+            }
+        }
+    }
+
+    private suspend fun loadSeriesVersionIds(): Map<String, String> {
+        val prefs = prefs ?: return emptyMap()
+        return prefs.dataFlow.first().asMap()
+            .filterKeys { it.name.startsWith(SERIES_VERSION_KEY_PREFIX) }
+            .mapKeys { (key, _) -> key.name.removePrefix(SERIES_VERSION_KEY_PREFIX) }
+            .mapValues { (_, value) -> value as? String ?: "" }
+            .filterValues { it.isNotBlank() }
+    }
+
+    private fun persistSeriesVersion(seriesId: String, versionId: String) {
+        val ctx = appContext ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                ctx.launcherDataStore.edit {
+                    it[stringPreferencesKey(SERIES_VERSION_KEY_PREFIX + seriesId)] = versionId
+                }
+            }.onFailure { Log.w("AbyssSeriesVersion", "Failed to persist version for $seriesId", it) }
+        }
+    }
+
+    private fun isTrailerSession(session: PlayerSession): Boolean =
+        session.mediaItem.id.startsWith(TRAILER_ID_PREFIX)
+
+    private fun needsJellyfinReAuth(result: LibrarySyncResult): Boolean = when (result) {
+        is LibrarySyncResult.Success -> false
+        is LibrarySyncResult.FetchFailed -> result.httpCode == 401
+        is LibrarySyncResult.Failure ->
+            result.error is SecurityException ||
+                (result.error as? JellyfinLibraryFetchFailedException)?.httpCode == 401 ||
+                result.error.message?.contains("401", ignoreCase = true) == true
+    }
+
+    private fun endActiveSession() {
+        if (_uiState.value.activePlayerSession == null) return
+        val posMs = playerManager.positionState.value.currentPositionMs
+        val durMs = playerManager.state.value.durationMs
+        closePlayer(posMs, durMs)
+    }
+
+    private fun resolveProgressSession(override: PlayerSession?): PlayerSession? {
+        val active = _uiState.value.activePlayerSession ?: return null
+        return if (override != null && override.mediaItem.id == active.mediaItem.id) override else active
+    }
+
+    private suspend fun setJellyfinWatched(config: JellyfinConfig, ids: List<String>, watched: Boolean) {
+        ids.chunked(WATCH_BATCH_SIZE).forEach { batch ->
+            coroutineScope {
+                batch.map { id ->
+                    async(Dispatchers.IO) {
+                        runCatching {
+                            if (watched) JellyfinRepository.markWatched(config, id)
+                            else JellyfinRepository.markUnwatched(config, id)
+                        }
+                    }
+                }.awaitAll()
+            }
         }
     }
 
@@ -351,15 +426,12 @@ class LauncherViewModel(
         )
     }
 
-    private fun recomputeDerivedState(
-        current: LauncherUiState,
-        movies: List<MediaItem> = current.movies,
-        series: List<MediaItem> = current.series,
-        tmdbTrending: List<MediaItem> = current.tmdbTrending,
-        playbackHistory: Map<String, PlaybackHistoryEntry> = current.playbackHistory,
-        selectedTab: AbyssNavTab = current.selectedTab
-    ): LauncherUiState {
-        val continueWatching = if (playbackHistory.isEmpty() && current.continueWatchingItems.isEmpty()) {
+    private fun recomputeDerivedState(current: LauncherUiState): LauncherUiState {
+        val movies = current.movies
+        val series = current.series
+        val tmdbTrending = current.tmdbTrending
+        val playbackHistory = current.playbackHistory
+        val continueWatching = if (playbackHistory.isEmpty() && rawJellyfinResumeItems.isEmpty()) {
             emptyList()
         } else {
             val historyEntries = playbackHistory.values
@@ -389,9 +461,7 @@ class LauncherViewModel(
                 )
             }.distinctBy { it.id }
 
-            // Combine with Jellyfin direct resume/next-up items (Jellyfin items take priority)
-            val jfResume = current.continueWatchingItems
-            (jfResume + fromHistory).distinctBy { it.id }
+            (rawJellyfinResumeItems + fromHistory).distinctBy { it.id }
         }
 
         val continueMovies = continueWatching.filter { it.category == MediaCategory.MOVIE }
@@ -400,9 +470,9 @@ class LauncherViewModel(
         val homeMov = movies.take(25)
         val homeSer = series.take(25)
 
-        val movTop100 = movies.sortedByDescending { it.rating.toDoubleOrNull() ?: 0.0 }.take(25)
+        val movTop100 = movies.sortedByDescending { it.rating.toDoubleOrNull() ?: 0.0 }.take(100)
         val movNouv = movies.take(25)
-        val serTop100 = series.sortedByDescending { it.rating.toDoubleOrNull() ?: 0.0 }.take(25)
+        val serTop100 = series.sortedByDescending { it.rating.toDoubleOrNull() ?: 0.0 }.take(100)
         val serNouv = series.take(25)
 
         // Spotlight candidates: 1. Most recent continue TV show/movie, 2. Seer Trending & Popular, 3. Jellyfin & TMDB
@@ -430,7 +500,6 @@ class LauncherViewModel(
         val watchlist = (movies + series).filter { current.watchlistIds.contains(it.id) }
 
         return current.copy(
-            selectedTab = selectedTab,
             movies = movies,
             series = series,
             tmdbTrending = tmdbTrending,
@@ -513,49 +582,52 @@ class LauncherViewModel(
         val safeItem = item.copy(streamUrl = safeStreamUrl)
 
         if (state.jellyfinConfig.playerPreference != PlayerPreference.ABYSS_INTERNAL) {
-            val launched = SystemAppHelper.playMediaExternal(context, safeItem, state.jellyfinConfig.playerPreference)
+            val launched = SystemAppHelper.playMediaExternal(
+                context,
+                safeItem,
+                state.jellyfinConfig.playerPreference,
+                apiKey = state.jellyfinConfig.accessToken
+            )
             if (launched) return
         }
 
-        val savedEntry = PlaybackHistoryRepository.getEntry(context, safeItem.id)
-        val savedPos = if (savedEntry != null && savedEntry.progressPercent < 0.95f) {
-            savedEntry.positionMs
-        } else 0L
-
-        val session = PlayerSession(
-            mediaItem = safeItem,
-            streamUrl = safeItem.streamUrl,
-            title = safeItem.title(),
-            subtitle = listOf(safeItem.year, safeItem.groupTitle()).filter { it.isNotBlank() }.joinToString(" • "),
-            startPositionMs = 0L,
-            savedResumePositionMs = savedPos
-        )
-
-        // Jellyfin playback probe & start report
         viewModelScope.launch(Dispatchers.IO) {
-            val jfId = safeItem.jellyfinId.ifBlank { safeItem.id }
-            JellyfinRepository.preparePlayback(state.jellyfinConfig, jfId)
-            JellyfinRepository.reportPlaybackStart(state.jellyfinConfig, jfId, savedPos)
-        }
+            val savedEntry = PlaybackHistoryRepository.getEntry(context, safeItem.id)
+            val savedPos = if (savedEntry != null && savedEntry.progressPercent < 0.95f) {
+                savedEntry.positionMs
+            } else 0L
 
-        if (savedEntry == null) {
-            PlaybackHistoryRepository.saveProgress(
-                context = context,
-                itemId = safeItem.id,
-                positionMs = 1_000L,
-                durationMs = 7_200_000L,
+            val session = PlayerSession(
+                mediaItem = safeItem,
                 streamUrl = safeItem.streamUrl,
+                rawStreamUrl = item.streamUrl,
                 title = safeItem.title(),
-                posterUrl = safeItem.posterUrl,
-                backdropUrl = safeItem.backdropUrl.ifBlank { safeItem.posterUrl },
-                category = MediaCategory.MOVIE.name
+                subtitle = listOf(safeItem.year, safeItem.groupTitle()).filter { it.isNotBlank() }.joinToString(" • "),
+                startPositionMs = 0L,
+                savedResumePositionMs = savedPos
             )
-        }
-        val updatedHistory = PlaybackHistoryRepository.getAllEntries(context)
-        viewModelScope.launch(Dispatchers.Default) {
-            _uiState.update { current ->
-                recomputeDerivedState(
-                    current = current.copy(activePlayerSession = session),
+
+            val jfId = safeItem.jellyfinId.ifBlank { safeItem.id }
+            runCatching { JellyfinRepository.preparePlayback(state.jellyfinConfig, jfId) }
+            runCatching { JellyfinRepository.reportPlaybackStart(state.jellyfinConfig, jfId, savedPos) }
+
+            if (savedEntry == null) {
+                PlaybackHistoryRepository.saveProgress(
+                    context = context,
+                    itemId = safeItem.id,
+                    positionMs = 1_000L,
+                    durationMs = 7_200_000L,
+                    streamUrl = safeItem.streamUrl,
+                    title = safeItem.title(),
+                    posterUrl = safeItem.posterUrl,
+                    backdropUrl = safeItem.backdropUrl.ifBlank { safeItem.posterUrl },
+                    category = MediaCategory.MOVIE.name
+                )
+            }
+            val updatedHistory = PlaybackHistoryRepository.getAllEntries(context)
+            updateLibraryState { current ->
+                current.copy(
+                    activePlayerSession = session,
                     movies = applyHistoryToItems(current.movies, updatedHistory),
                     series = applyHistoryToItems(current.series, updatedHistory),
                     playbackHistory = updatedHistory
@@ -565,6 +637,7 @@ class LauncherViewModel(
     }
 
     fun openMovieDetails(movieItem: MediaItem) {
+        movieDetailsJob?.cancel()
         _uiState.update {
             it.copy(
                 selectedMovieForDetails = movieItem,
@@ -572,18 +645,19 @@ class LauncherViewModel(
                 isLoadingMovieDetails = true
             )
         }
-        viewModelScope.launch {
+        movieDetailsJob = viewModelScope.launch(Dispatchers.IO) {
             val details = JellyfinRepository.fetchMovieDetails(_uiState.value.jellyfinConfig, movieItem)
-            _uiState.update {
-                it.copy(
-                    activeMovieDetails = details,
-                    isLoadingMovieDetails = false
-                )
+            if (_uiState.value.selectedMovieForDetails?.id != movieItem.id) return@launch
+            _uiState.update { current ->
+                if (current.selectedMovieForDetails?.id == movieItem.id) {
+                    current.copy(activeMovieDetails = details, isLoadingMovieDetails = false)
+                } else current
             }
         }
     }
 
     fun closeMovieDetails() {
+        movieDetailsJob?.cancel()
         _uiState.update {
             it.copy(
                 selectedMovieForDetails = null,
@@ -616,14 +690,15 @@ class LauncherViewModel(
         if (trailerUrl.contains("/Videos/") && trailerUrl.contains("/stream")) {
             val session = PlayerSession(
                 mediaItem = MediaItem(
-                    id = "trailer_${System.currentTimeMillis()}",
+                    id = "$TRAILER_ID_PREFIX${System.currentTimeMillis()}",
                     title = title,
                     category = MediaCategory.MOVIE,
                     streamUrl = trailerUrl
                 ),
                 streamUrl = trailerUrl,
+                rawStreamUrl = trailerUrl,
                 title = title,
-                subtitle = "Bande-annonce",
+                subtitle = context.getString(R.string.cta_trailer),
                 startPositionMs = 0L
             )
             _uiState.update { it.copy(activePlayerSession = session) }
@@ -664,6 +739,7 @@ class LauncherViewModel(
     }
 
     fun openSeriesEpisodePicker(seriesItem: MediaItem) {
+        seriesDetailsJob?.cancel()
         _uiState.update {
             it.copy(
                 selectedSeriesForEpisodes = seriesItem,
@@ -671,27 +747,32 @@ class LauncherViewModel(
                 isLoadingSeriesDetails = true
             )
         }
-        viewModelScope.launch {
+        seriesDetailsJob = viewModelScope.launch(Dispatchers.IO) {
             val details = if (_uiState.value.jellyfinConfig.isConfigured) {
                 JellyfinRepository.fetchSeriesDetails(_uiState.value.jellyfinConfig, seriesItem)
             } else null
+            if (_uiState.value.selectedSeriesForEpisodes?.id != seriesItem.id) return@launch
 
             val resolvedDetails = details ?: run {
                 seriesItem.tmdbId?.let { tmdbId ->
                     TmdbRepository.fetchSeriesDetailsFromTmdb(tmdbId, seriesItem)
                 }
             }
+            if (_uiState.value.selectedSeriesForEpisodes?.id != seriesItem.id) return@launch
 
-            _uiState.update {
-                it.copy(
-                    activeSeriesDetails = applyHistoryToSeriesDetails(resolvedDetails, it.playbackHistory),
-                    isLoadingSeriesDetails = false
-                )
+            _uiState.update { current ->
+                if (current.selectedSeriesForEpisodes?.id == seriesItem.id) {
+                    current.copy(
+                        activeSeriesDetails = applyHistoryToSeriesDetails(resolvedDetails, current.playbackHistory),
+                        isLoadingSeriesDetails = false
+                    )
+                } else current
             }
         }
     }
 
     fun closeSeriesEpisodePicker() {
+        seriesDetailsJob?.cancel()
         _uiState.update {
             it.copy(
                 selectedSeriesForEpisodes = null,
@@ -701,26 +782,25 @@ class LauncherViewModel(
         }
     }
 
-    private val preferredSeriesVersionLabel = mutableMapOf<String, String>()
-
     fun selectEpisodeVersion(episodeId: String, versionId: String) {
+        val details = _uiState.value.activeSeriesDetails ?: return
+        val target = details.seasons.flatMap { it.episodes }.firstOrNull { it.id == episodeId }
+        if (target == null || target.versions.none { it.id == versionId }) return
+        preferredSeriesVersionIds = preferredSeriesVersionIds + (details.seriesItem.id to versionId)
+        persistSeriesVersion(details.seriesItem.id, versionId)
         _uiState.update { state ->
             val currentDetails = state.activeSeriesDetails ?: return@update state
-            var matchedLabel: String? = null
-            val updatedSeasons = currentDetails.seasons.map { season ->
-                season.copy(
-                    episodes = season.episodes.map { ep ->
-                        if (ep.id == episodeId) {
-                            matchedLabel = ep.versions.firstOrNull { it.id == versionId }?.name
-                            ep.copy(selectedVersionId = versionId)
-                        } else ep
+            state.copy(
+                activeSeriesDetails = currentDetails.copy(
+                    seasons = currentDetails.seasons.map { season ->
+                        season.copy(
+                            episodes = season.episodes.map { ep ->
+                                if (ep.id == episodeId) ep.copy(selectedVersionId = versionId) else ep
+                            }
+                        )
                     }
                 )
-            }
-            if (matchedLabel != null) {
-                preferredSeriesVersionLabel[currentDetails.seriesItem.id] = matchedLabel!!
-            }
-            state.copy(activeSeriesDetails = currentDetails.copy(seasons = updatedSeasons))
+            )
         }
     }
 
@@ -731,24 +811,40 @@ class LauncherViewModel(
         startPositionMs: Long,
         versionId: String? = null
     ) {
+        val ctx = appContext ?: return
         val config = _uiState.value.jellyfinConfig
-        val prefLabel = preferredSeriesVersionLabel[seriesItem.id]
         val chosenVersion = versionId?.let { id -> episode.versions.firstOrNull { it.id == id } }
             ?: episode.selectedVersionId?.let { id -> episode.versions.firstOrNull { it.id == id } }
-            ?: prefLabel?.let { label ->
-                episode.versions.firstOrNull { it.name.equals(label, ignoreCase = true) }
-                    ?: episode.versions.firstOrNull { it.resolution.isNotBlank() && label.contains(it.resolution, ignoreCase = true) }
-            }
+            ?: preferredSeriesVersionIds[seriesItem.id]?.let { id -> episode.versions.firstOrNull { it.id == id } }
             ?: episode.versions.firstOrNull()
         if (chosenVersion != null) {
-            preferredSeriesVersionLabel[seriesItem.id] = chosenVersion.name
+            preferredSeriesVersionIds = preferredSeriesVersionIds + (seriesItem.id to chosenVersion.id)
+            persistSeriesVersion(seriesItem.id, chosenVersion.id)
         }
         val safeStreamUrl = JellyfinRepository.sanitizeStreamUrl(episode.streamUrl, config, chosenVersion?.id)
         val safeEpisode = episode.copy(streamUrl = safeStreamUrl)
         val epCode = "S${safeEpisode.seasonNumber.toString().padStart(2, '0')}E${safeEpisode.episodeNumber.toString().padStart(2, '0')}"
+
+        if (config.playerPreference != PlayerPreference.ABYSS_INTERNAL) {
+            val externalItem = seriesItem.copy(
+                id = safeEpisode.id,
+                jellyfinId = safeEpisode.id,
+                streamUrl = safeStreamUrl,
+                title = "${seriesItem.title()} — $epCode"
+            )
+            if (SystemAppHelper.playMediaExternal(
+                    ctx,
+                    externalItem,
+                    config.playerPreference,
+                    apiKey = config.accessToken
+                )
+            ) return
+        }
+
         val session = PlayerSession(
-            mediaItem = seriesItem.copy(id = safeEpisode.id, streamUrl = safeEpisode.streamUrl),
-            streamUrl = safeEpisode.streamUrl,
+            mediaItem = seriesItem.copy(id = safeEpisode.id, streamUrl = safeStreamUrl),
+            streamUrl = safeStreamUrl,
+            rawStreamUrl = episode.streamUrl,
             title = "${seriesItem.title()} — $epCode",
             subtitle = safeEpisode.title,
             startPositionMs = 0L,
@@ -759,13 +855,10 @@ class LauncherViewModel(
             nextEpisode = nextEpisode
         )
 
-        // Jellyfin playback probe & start report
         viewModelScope.launch(Dispatchers.IO) {
-            JellyfinRepository.preparePlayback(config, safeEpisode.id)
-            JellyfinRepository.reportPlaybackStart(config, safeEpisode.id, startPositionMs)
-        }
+            runCatching { JellyfinRepository.preparePlayback(config, safeEpisode.id) }
+            runCatching { JellyfinRepository.reportPlaybackStart(config, safeEpisode.id, startPositionMs) }
 
-        appContext?.let { ctx ->
             if (startPositionMs <= 0L) {
                 PlaybackHistoryRepository.saveProgress(
                     context = ctx,
@@ -784,15 +877,13 @@ class LauncherViewModel(
                 )
             }
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
-            viewModelScope.launch(Dispatchers.Default) {
-                _uiState.update { current ->
-                    recomputeDerivedState(
-                        current = current.copy(activePlayerSession = session),
-                        movies = applyHistoryToItems(current.movies, updatedHistory),
-                        series = applyHistoryToItems(current.series, updatedHistory),
-                        playbackHistory = updatedHistory
-                    )
-                }
+            updateLibraryState { current ->
+                current.copy(
+                    activePlayerSession = session,
+                    movies = applyHistoryToItems(current.movies, updatedHistory),
+                    series = applyHistoryToItems(current.series, updatedHistory),
+                    playbackHistory = updatedHistory
+                )
             }
         }
     }
@@ -846,43 +937,56 @@ class LauncherViewModel(
         sessionOverride: PlayerSession? = null
     ) {
         val ctx = appContext ?: return
-        val session = sessionOverride ?: _uiState.value.activePlayerSession ?: return
+        val session = resolveProgressSession(sessionOverride) ?: return
         if (durationMs <= 0L && positionMs <= 0L) return
 
         val itemId = session.mediaItem.id
+        if (itemId == progressSessionId && positionMs <= lastProgressPositionMs) return
+        progressSessionId = itemId
+        lastProgressPositionMs = positionMs
+        val isTrailer = isTrailerSession(session)
+        val config = _uiState.value.jellyfinConfig
 
         viewModelScope.launch(Dispatchers.IO) {
-            JellyfinRepository.reportPlaybackProgress(_uiState.value.jellyfinConfig, itemId, positionMs, isPaused = isPaused)
-
-            PlaybackHistoryRepository.saveProgress(
-                context = ctx,
-                itemId = itemId,
-                positionMs = positionMs,
-                durationMs = durationMs,
-                seriesId = session.seriesId,
-                seasonNumber = session.seasonNumber,
-                episodeNumber = session.episodeNumber,
-                episodeTitle = session.subtitle,
-                streamUrl = session.streamUrl,
-                title = session.mediaItem.title(),
-                posterUrl = session.mediaItem.posterUrl,
-                backdropUrl = session.mediaItem.backdropUrl.ifBlank { session.mediaItem.posterUrl },
-                category = if (session.seriesId.isNotBlank()) MediaCategory.SERIES.name else MediaCategory.MOVIE.name
-            )
+            if (!isTrailer) {
+                runCatching { JellyfinRepository.reportPlaybackProgress(config, itemId, positionMs, isPaused) }
+                    .onFailure { Log.w("AbyssPlayback", "Progress report failed for $itemId", it) }
+                runCatching {
+                    PlaybackHistoryRepository.saveProgress(
+                        context = ctx,
+                        itemId = itemId,
+                        positionMs = positionMs,
+                        durationMs = durationMs,
+                        seriesId = session.seriesId,
+                        seasonNumber = session.seasonNumber,
+                        episodeNumber = session.episodeNumber,
+                        episodeTitle = session.subtitle,
+                        streamUrl = session.streamUrl,
+                        title = session.mediaItem.title(),
+                        posterUrl = session.mediaItem.posterUrl,
+                        backdropUrl = session.mediaItem.backdropUrl.ifBlank { session.mediaItem.posterUrl },
+                        category = if (session.seriesId.isNotBlank()) MediaCategory.SERIES.name else MediaCategory.MOVIE.name
+                    )
+                }.onFailure { Log.w("AbyssPlayback", "Progress history save failed for $itemId", it) }
+            }
         }
     }
 
     fun closePlayer(positionMs: Long, durationMs: Long) {
         val ctx = appContext
-        val session = _uiState.value.activePlayerSession
+        val session = _uiState.value.activePlayerSession ?: return
         _uiState.update { it.copy(activePlayerSession = null) }
-        if (ctx != null && session != null && (durationMs > 0L || positionMs > 0L)) {
-            val itemId = session.mediaItem.id
-            val jfConfig = _uiState.value.jellyfinConfig
+        progressSessionId = ""
+        if (ctx == null || (durationMs <= 0L && positionMs <= 0L)) return
+        val isTrailer = isTrailerSession(session)
+        val itemId = session.mediaItem.id
+        val jfConfig = _uiState.value.jellyfinConfig
 
-            viewModelScope.launch(Dispatchers.IO) {
-                JellyfinRepository.reportPlaybackStopped(jfConfig, itemId, positionMs)
-
+        viewModelScope.launch(Dispatchers.IO) {
+            if (isTrailer) return@launch
+            runCatching { JellyfinRepository.reportPlaybackStopped(jfConfig, itemId, positionMs) }
+                .onFailure { Log.w("AbyssPlayback", "Stop report failed for $itemId", it) }
+            runCatching {
                 PlaybackHistoryRepository.saveProgress(
                     context = ctx,
                     itemId = itemId,
@@ -898,17 +1002,14 @@ class LauncherViewModel(
                     backdropUrl = session.mediaItem.backdropUrl.ifBlank { session.mediaItem.posterUrl },
                     category = if (session.seriesId.isNotBlank()) MediaCategory.SERIES.name else MediaCategory.MOVIE.name
                 )
-                val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
-                withContext(Dispatchers.Default) {
-                    _uiState.update { current ->
-                        recomputeDerivedState(
-                            current = current,
-                            movies = applyHistoryToItems(current.movies, updatedHistory),
-                            series = applyHistoryToItems(current.series, updatedHistory),
-                            playbackHistory = updatedHistory
-                        )
-                    }
-                }
+            }.onFailure { Log.w("AbyssPlayback", "Stop history save failed for $itemId", it) }
+            val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
+            updateLibraryState { current ->
+                current.copy(
+                    movies = applyHistoryToItems(current.movies, updatedHistory),
+                    series = applyHistoryToItems(current.series, updatedHistory),
+                    playbackHistory = updatedHistory
+                )
             }
         }
     }
@@ -995,8 +1096,12 @@ class LauncherViewModel(
             accessToken = "" // Clear old token to force re-auth
         )
         prefs?.jellyfinConfig = updated
+        hasSyncedJellyfinThisSession = false
         _uiState.update { it.copy(jellyfinConfig = updated) }
-        syncJellyfinLibrary(updated, showToast = true)
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs?.awaitWrites()
+            syncJellyfinLibrary(updated, showToast = true)
+        }
     }
 
     fun syncJellyfinLibrary(config: JellyfinConfig, showToast: Boolean) {
@@ -1009,6 +1114,7 @@ class LauncherViewModel(
                 if (authRes.isSuccess) {
                     val authed = authRes.getOrThrow()
                     prefs?.jellyfinConfig = authed
+                    prefs?.awaitWrites()
                     _uiState.update { it.copy(jellyfinConfig = authed) }
                     jellyfinWebSocketClient.connect(authed)
                     authed
@@ -1026,33 +1132,31 @@ class LauncherViewModel(
                 config
             }
 
-            // 2. Sync Library items
-            var syncRes = JellyfinRepository.syncLibrary(activeConfig)
+            var syncResult = JellyfinRepository.syncLibraryDetailed(activeConfig)
 
-            // Auto-heal: If token expired (401) or sync failed, re-authenticate with credentials and retry
-            if ((syncRes.isFailure || (syncRes.isSuccess && syncRes.getOrThrow().movies.isEmpty() && syncRes.getOrThrow().series.isEmpty()))
+            if (needsJellyfinReAuth(syncResult)
                 && activeConfig.username.isNotBlank() && activeConfig.password.isNotBlank()
             ) {
-                Log.i("AbyssJellyfin", "Sync failed or empty; attempting re-authentication with server...")
+                Log.i("AbyssJellyfin", "Sync requires re-auth; re-authenticating with server...")
                 val reAuthRes = JellyfinRepository.authenticate(activeConfig.copy(accessToken = ""))
                 if (reAuthRes.isSuccess) {
                     activeConfig = reAuthRes.getOrThrow()
                     prefs?.jellyfinConfig = activeConfig
+                    prefs?.awaitWrites()
                     _uiState.update { it.copy(jellyfinConfig = activeConfig) }
                     jellyfinWebSocketClient.connect(activeConfig)
-                    syncRes = JellyfinRepository.syncLibrary(activeConfig)
+                    syncResult = JellyfinRepository.syncLibraryDetailed(activeConfig)
                 }
             }
 
-            val resumeItems = JellyfinRepository.fetchResumeAndNextUp(activeConfig)
+            val resumeItems = runCatching { JellyfinRepository.fetchResumeAndNextUp(activeConfig) }
+                .getOrDefault(emptyList())
 
-            if (syncRes.isSuccess) {
-                val lib = syncRes.getOrThrow()
-                if (lib.movies.isNotEmpty() || lib.series.isNotEmpty()) {
-                    hasSyncedJellyfinThisSession = true
-                }
+            if (syncResult is LibrarySyncResult.Success) {
+                val lib = syncResult.library
+                hasSyncedJellyfinThisSession = true
                 if (lib.movies.isEmpty() && lib.series.isEmpty() && (_uiState.value.movies.isNotEmpty() || _uiState.value.series.isNotEmpty())) {
-                    Log.w("AbyssJellyfin", "Sync returned empty items; preserving existing cached library")
+                    Log.w("AbyssJellyfin", "Sync succeeded with an empty library; preserving cached items without re-auth")
                     _uiState.update { it.copy(isSyncingJellyfin = false) }
                     return@launch
                 }
@@ -1068,18 +1172,14 @@ class LauncherViewModel(
                     MediaLibraryCache.save(ctx, lib)
                 }
 
-                withContext(Dispatchers.Default) {
-                    _uiState.update { current ->
-                        recomputeDerivedState(
-                            current = current.copy(
-                                jellyfinConfig = updatedConfig,
-                                isSyncingJellyfin = false,
-                                continueWatchingItems = resumeItems
-                            ),
-                            movies = lib.movies,
-                            series = lib.series
-                        )
-                    }
+                rawJellyfinResumeItems = resumeItems
+                updateLibraryState { current ->
+                    current.copy(
+                        jellyfinConfig = updatedConfig,
+                        isSyncingJellyfin = false,
+                        movies = lib.movies,
+                        series = lib.series
+                    )
                 }
                 if (showToast) {
                     withContext(Dispatchers.Main) {
@@ -1103,10 +1203,12 @@ class LauncherViewModel(
             apiKey = apiKey
         )
         prefs?.seerConfig = updated
+        hasSyncedSeerThisSession = false
         val safeTab = if (!updated.isConfigured && _uiState.value.selectedTab == AbyssNavTab.DISCOVER) AbyssNavTab.HOME else _uiState.value.selectedTab
         _uiState.update { it.copy(seerConfig = updated, isTestingSeer = true, selectedTab = safeTab) }
 
         viewModelScope.launch(Dispatchers.IO) {
+            prefs?.awaitWrites()
             val testRes = SeerRepository.testConnection(updated)
             withContext(Dispatchers.Main) {
                 _uiState.update { it.copy(isTestingSeer = false) }
@@ -1130,6 +1232,7 @@ class LauncherViewModel(
                     val key = authRes.getOrThrow()
                     val authed = config.copy(apiKey = key)
                     prefs?.seerConfig = authed
+                    prefs?.awaitWrites()
                     _uiState.update { it.copy(seerConfig = authed) }
                     authed
                 } else config
@@ -1155,18 +1258,16 @@ class LauncherViewModel(
             var popTvRes = batch[2]
             var requestsRes = batch[3]
 
-            // Auto-heal: If auth failed or results are empty and we have Jellyfin credentials, re-authenticate via Jellyfin
-            val isAuthFailed = listOf(trendingRes, popMoviesRes, popTvRes, requestsRes).any {
-                it.isFailure && it.exceptionOrNull() is SecurityException
-            } || (trendingRes.getOrNull().isNullOrEmpty() && popMoviesRes.getOrNull().isNullOrEmpty() && jf.isConfigured && jf.username.isNotBlank())
+            val isAuthFailed = listOf(trendingRes, popMoviesRes, popTvRes, requestsRes).any { it.isFailure }
 
             if (isAuthFailed && jf.isConfigured && jf.username.isNotBlank()) {
-                Log.i("AbyssSeer", "Seer session expired or empty; re-authenticating with Jellyfin credentials...")
+                Log.i("AbyssSeer", "Seer sync failed (trending/movies/tv/requests); re-authenticating with Jellyfin credentials...")
                 val reAuthRes = SeerRepository.authenticateWithJellyfin(activeConfig.serverUrl, jf.username, jf.password)
                 if (reAuthRes.isSuccess) {
                     val newKey = reAuthRes.getOrThrow()
                     activeConfig = activeConfig.copy(apiKey = newKey)
                     prefs?.seerConfig = activeConfig
+                    prefs?.awaitWrites()
                     _uiState.update { it.copy(seerConfig = activeConfig) }
 
                     batch = fetchSeerBatch(activeConfig)
@@ -1181,16 +1282,14 @@ class LauncherViewModel(
             val popMovies = popMoviesRes.getOrDefault(emptyList())
             val popTv = popTvRes.getOrDefault(emptyList())
             val requests = requestsRes.getOrDefault(emptyList())
+            val allSucceeded = listOf(trendingRes, popMoviesRes, popTvRes, requestsRes).all { it.isSuccess }
+            hasSyncedSeerThisSession = allSucceeded
 
             Log.d("AbyssSeer", "Seer sync complete: ${trending.size} trending, ${popMovies.size} pop movies, ${popTv.size} pop tv, ${requests.size} requests")
 
-            // Guard against wiping out local cached Seer items if network temporarily failed
-            if (trending.isEmpty() && popMovies.isEmpty() && popTv.isEmpty() && _uiState.value.seerTrending.isNotEmpty()) {
-                Log.w("AbyssSeer", "Seer sync returned empty; preserving existing cached items")
+            if (!allSucceeded && _uiState.value.seerTrending.isNotEmpty()) {
+                Log.w("AbyssSeer", "Seer sync failed; preserving existing cached items")
                 return@launch
-            }
-            if (trending.isNotEmpty() || popMovies.isNotEmpty() || popTv.isNotEmpty()) {
-                hasSyncedSeerThisSession = true
             }
 
             val curMovies = _uiState.value.movies
@@ -1217,18 +1316,14 @@ class LauncherViewModel(
                 MediaLibraryCache.save(ctx, updatedLib)
             }
 
-            withContext(Dispatchers.Default) {
-                _uiState.update { current ->
-                    recomputeDerivedState(
-                        current.copy(
-                            seerConfig = updatedConfig,
-                            seerTrending = enrichedTrending,
-                            seerPopularMovies = enrichedPopMovies,
-                            seerPopularTv = enrichedPopTv,
-                            seerRequests = requests
-                        )
-                    )
-                }
+            updateLibraryState { current ->
+                current.copy(
+                    seerConfig = updatedConfig,
+                    seerTrending = enrichedTrending,
+                    seerPopularMovies = enrichedPopMovies,
+                    seerPopularTv = enrichedPopTv,
+                    seerRequests = requests
+                )
             }
 
             startSeerPolling(activeConfig)
@@ -1290,10 +1385,7 @@ class LauncherViewModel(
     }
 
     fun handleHomePressed() {
-        val currentSession = _uiState.value.activePlayerSession
-        if (currentSession != null) {
-            _uiState.update { it.copy(activePlayerSession = null) }
-        }
+        endActiveSession()
         if (_uiState.value.isSearchActive) {
             setSearchActive(false)
         }
@@ -1312,10 +1404,7 @@ class LauncherViewModel(
     }
 
     fun onActivityStopped() {
-        val currentSession = _uiState.value.activePlayerSession
-        if (currentSession != null) {
-            _uiState.update { it.copy(activePlayerSession = null) }
-        }
+        endActiveSession()
     }
 
     fun onActivityResumed() {
@@ -1325,9 +1414,10 @@ class LauncherViewModel(
                 jellyfinWebSocketClient.reconnectIfNeeded()
             }
             viewModelScope.launch(Dispatchers.IO) {
-                val resumeItems = JellyfinRepository.fetchResumeAndNextUp(jfConfig)
-                if (resumeItems.isNotEmpty()) {
-                    _uiState.update { it.copy(continueWatchingItems = resumeItems) }
+                val resumeItems = runCatching { JellyfinRepository.fetchResumeAndNextUp(jfConfig) }.getOrNull()
+                if (resumeItems != null) {
+                    rawJellyfinResumeItems = resumeItems
+                    updateLibraryState { it }
                 }
             }
         }
@@ -1369,16 +1459,12 @@ class LauncherViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             PlaybackHistoryRepository.clearEntry(ctx, item.id)
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
-            withContext(Dispatchers.Default) {
-                _uiState.update { current ->
-                    recomputeDerivedState(
-                        current = current.copy(
-                            selectedMediaForMenu = null,
-                            continueWatchingItems = current.continueWatchingItems.filter { it.id != item.id }
-                        ),
-                        playbackHistory = updatedHistory
-                    )
-                }
+            rawJellyfinResumeItems = rawJellyfinResumeItems.filter { it.id != item.id }
+            updateLibraryState { current ->
+                current.copy(
+                    selectedMediaForMenu = null,
+                    playbackHistory = updatedHistory
+                )
             }
             showStatusMessage(R.string.msg_removed_continue, durationMs = 2500L)
         }
@@ -1391,36 +1477,31 @@ class LauncherViewModel(
             val isWatched = (hist?.progressPercent ?: 0f) >= 0.95f
             val jfConfig = _uiState.value.jellyfinConfig
 
-            if (isWatched) {
-                PlaybackHistoryRepository.clearEntry(ctx, item.id)
-                JellyfinRepository.markUnwatched(jfConfig, item.jellyfinId.ifBlank { item.id })
-                showStatusMessage(R.string.msg_marked_single_unwatched, durationMs = 2500L)
-            } else {
-                PlaybackHistoryRepository.saveProgress(
-                    context = ctx,
-                    itemId = item.id,
-                    positionMs = 3_600_000L,
-                    durationMs = 3_600_000L,
-                    streamUrl = item.streamUrl,
-                    title = item.title(),
-                    posterUrl = item.posterUrl,
-                    backdropUrl = item.backdropUrl.ifBlank { item.posterUrl },
-                    category = item.category.name
-                )
-                JellyfinRepository.markWatched(jfConfig, item.jellyfinId.ifBlank { item.id })
-                showStatusMessage(R.string.msg_marked_single_watched, durationMs = 2500L)
-            }
+            val jfId = item.jellyfinId.ifBlank { item.id }
+            PlaybackHistoryRepository.clearEntry(ctx, item.id)
+            rawJellyfinResumeItems = rawJellyfinResumeItems.filter { it.id != jfId && it.jellyfinId != jfId }
+            runCatching {
+                if (isWatched) JellyfinRepository.markUnwatched(jfConfig, jfId)
+                else JellyfinRepository.markWatched(jfConfig, jfId)
+            }.onFailure { Log.w("AbyssWatched", "Jellyfin watched toggle failed for $jfId", it) }
+            showStatusMessage(
+                if (isWatched) R.string.msg_marked_single_unwatched else R.string.msg_marked_single_watched,
+                durationMs = 2500L
+            )
 
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
-            withContext(Dispatchers.Default) {
-                _uiState.update { current ->
-                    recomputeDerivedState(
-                        current = current.copy(selectedMediaForMenu = null),
-                        movies = applyHistoryToItems(current.movies, updatedHistory),
-                        series = applyHistoryToItems(current.series, updatedHistory),
-                        playbackHistory = updatedHistory
-                    )
-                }
+            val watched = !isWatched
+            updateLibraryState { current ->
+                current.copy(
+                    selectedMediaForMenu = null,
+                    playbackHistory = updatedHistory,
+                    movies = current.movies.map {
+                        if (it.id == item.id || it.jellyfinId == jfId) it.copy(progressPercent = if (watched) 1f else 0f) else it
+                    },
+                    series = current.series.map {
+                        if (it.id == item.id || it.jellyfinId == jfId) it.copy(progressPercent = if (watched) 1f else 0f) else it
+                    }
+                )
             }
         }
     }
@@ -1475,26 +1556,19 @@ class LauncherViewModel(
                 category = MediaCategory.SERIES.name
             )
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
-            withContext(Dispatchers.Default) {
-                _uiState.update { current ->
-                    recomputeDerivedState(
-                        current = current,
-                        movies = applyHistoryToItems(current.movies, updatedHistory),
-                        series = applyHistoryToItems(current.series, updatedHistory),
-                        playbackHistory = updatedHistory
-                    )
-                }
+            updateLibraryState { current ->
+                current.copy(
+                    movies = applyHistoryToItems(current.movies, updatedHistory),
+                    series = applyHistoryToItems(current.series, updatedHistory),
+                    playbackHistory = updatedHistory
+                )
             }
 
             showStatusMessage(R.string.msg_all_prev_watched, durationMs = 2500L)
 
             val targetIdx = allEpisodes.indexOfFirst { it.id == targetEpisode.id }
             if (targetIdx != -1) {
-                coroutineScope {
-                    (0..targetIdx).map { i ->
-                        async { JellyfinRepository.markWatched(jfConfig, allEpisodes[i].id) }
-                    }.awaitAll()
-                }
+                setJellyfinWatched(jfConfig, allEpisodes.take(targetIdx + 1).map { it.id }, true)
             }
         }
     }
@@ -1508,8 +1582,9 @@ class LauncherViewModel(
         val jfConfig = _uiState.value.jellyfinConfig
 
         viewModelScope.launch(Dispatchers.IO) {
-            val isCurrentlyWatched = (PlaybackHistoryRepository.getEntry(ctx, targetEpisode.id)?.progressPercent ?: 0f) >= 0.95f ||
-                    (targetEpisode.progressPercent >= 0.95f && PlaybackHistoryRepository.getEntry(ctx, targetEpisode.id) == null)
+            val targetEntry = PlaybackHistoryRepository.getEntry(ctx, targetEpisode.id)
+            val isCurrentlyWatched = (targetEntry?.progressPercent ?: 0f) >= 0.95f ||
+                    (targetEpisode.progressPercent >= 0.95f && targetEntry == null)
             if (isCurrentlyWatched) {
                 PlaybackHistoryRepository.unmarkEpisodeWatched(
                     context = ctx,
@@ -1535,25 +1610,18 @@ class LauncherViewModel(
             }
 
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
-            withContext(Dispatchers.Default) {
-                _uiState.update { current ->
-                    recomputeDerivedState(
-                        current = current,
-                        movies = applyHistoryToItems(current.movies, updatedHistory),
-                        series = applyHistoryToItems(current.series, updatedHistory),
-                        playbackHistory = updatedHistory
-                    )
-                }
+            updateLibraryState { current ->
+                current.copy(
+                    movies = applyHistoryToItems(current.movies, updatedHistory),
+                    series = applyHistoryToItems(current.series, updatedHistory),
+                    playbackHistory = updatedHistory
+                )
             }
             val epCode = "S${targetEpisode.seasonNumber.toString().padStart(2, '0')}E${targetEpisode.episodeNumber.toString().padStart(2, '0')}"
             val resId = if (isCurrentlyWatched) R.string.msg_marked_unwatched else R.string.msg_marked_watched
             showStatusMessage(resId, epCode, durationMs = 2500L)
 
-            if (isCurrentlyWatched) {
-                JellyfinRepository.markUnwatched(jfConfig, targetEpisode.id)
-            } else {
-                JellyfinRepository.markWatched(jfConfig, targetEpisode.id)
-            }
+            setJellyfinWatched(jfConfig, listOf(targetEpisode.id), !isCurrentlyWatched)
         }
     }
 
@@ -1578,26 +1646,19 @@ class LauncherViewModel(
             )
 
             val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
-            withContext(Dispatchers.Default) {
-                _uiState.update { current ->
-                    recomputeDerivedState(
-                        current = current,
-                        movies = applyHistoryToItems(current.movies, updatedHistory),
-                        series = applyHistoryToItems(current.series, updatedHistory),
-                        playbackHistory = updatedHistory
-                    )
-                }
+            updateLibraryState { current ->
+                current.copy(
+                    movies = applyHistoryToItems(current.movies, updatedHistory),
+                    series = applyHistoryToItems(current.series, updatedHistory),
+                    playbackHistory = updatedHistory
+                )
             }
 
             showStatusMessage(R.string.msg_all_following_unwatched, durationMs = 2500L)
 
             val targetIdx = allEpisodes.indexOfFirst { it.id == targetEpisode.id }
             if (targetIdx != -1) {
-                coroutineScope {
-                    (targetIdx until allEpisodes.size).map { i ->
-                        async { JellyfinRepository.markUnwatched(jfConfig, allEpisodes[i].id) }
-                    }.awaitAll()
-                }
+                setJellyfinWatched(jfConfig, allEpisodes.drop(targetIdx).map { it.id }, false)
             }
         }
     }
@@ -1638,29 +1699,12 @@ class LauncherViewModel(
 
     fun setLanguage(lang: AppLanguage) {
         prefs?.language = lang
-        applyLanguage(lang)
         _uiState.update { it.copy(language = lang) }
         viewModelScope.launch {
             SeerRepository.clearCache()
             appContext?.let { MediaLibraryCache.clear(it) }
             syncJellyfinLibrary(_uiState.value.jellyfinConfig, showToast = false)
             syncSeerData(_uiState.value.seerConfig)
-        }
-    }
-
-    private fun applyLanguage(lang: AppLanguage) {
-        val targetLocale = when (lang) {
-            AppLanguage.FR -> java.util.Locale.FRENCH
-            AppLanguage.EN -> java.util.Locale.ENGLISH
-            AppLanguage.AUTO -> java.util.Locale.getDefault()
-        }
-        java.util.Locale.setDefault(targetLocale)
-        appContext?.let { ctx ->
-            val res = ctx.resources
-            val config = res.configuration
-            config.setLocale(targetLocale)
-            @Suppress("DEPRECATION")
-            res.updateConfiguration(config, res.displayMetrics)
         }
     }
 

@@ -63,13 +63,6 @@ class RemoteMediaListenerService : NotificationListenerService() {
         super.onListenerDisconnected()
     }
 
-    fun refreshNow() {
-        val component = ComponentName(this, RemoteMediaListenerService::class.java)
-        runCatching {
-            updateFromControllers(sessionManager?.getActiveSessions(component).orEmpty())
-        }
-    }
-
     private fun updateFromControllers(controllers: List<MediaController>) {
         val chosen = controllers.firstOrNull { controller ->
             val pkg = controller.packageName

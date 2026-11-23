@@ -167,10 +167,16 @@ class LauncherPreferences(private val context: Context) {
                 mutate { it[KEY_REMOTE_PIN] = encryptForStorage(migrated) }
             }
             if (existing.length == 6) {
+                if (read { it[KEY_REMOTE_PIN_ISSUED_AT] ?: 0L } == 0L) {
+                    mutate { it[KEY_REMOTE_PIN_ISSUED_AT] = System.currentTimeMillis() }
+                }
                 existing
             } else {
                 val generated = RemotePairingAndKeyHelper.generatePin()
-                mutate { it[KEY_REMOTE_PIN] = encryptForStorage(generated) }
+                mutate {
+                    it[KEY_REMOTE_PIN] = encryptForStorage(generated)
+                    it[KEY_REMOTE_PIN_ISSUED_AT] = System.currentTimeMillis()
+                }
                 awaitWrites()
                 generated
             }
@@ -330,7 +336,14 @@ class LauncherPreferences(private val context: Context) {
                 mutate { it[KEY_REMOTE_PIN] = encryptForStorage(migrated) }
             }.takeIf { it.length == 6 } ?: ""
         }
-        set(value) = mutate { prefs -> prefs[KEY_REMOTE_PIN] = encryptForStorage(value) }
+        set(value) = mutate { prefs ->
+            prefs[KEY_REMOTE_PIN] = encryptForStorage(value)
+            prefs[KEY_REMOTE_PIN_ISSUED_AT] = System.currentTimeMillis()
+        }
+
+    var remotePinIssuedAt: Long
+        get() = read { it[KEY_REMOTE_PIN_ISSUED_AT] ?: 0L }
+        set(value) = mutate { it[KEY_REMOTE_PIN_ISSUED_AT] = value }
 
     val deviceId: String
         get() = read { prefs -> prefs[KEY_DEVICE_ID]?.takeIf { it.isNotBlank() } ?: "" }
@@ -380,6 +393,7 @@ class LauncherPreferences(private val context: Context) {
         private val KEY_SEARCH_HISTORY = stringPreferencesKey("search_history")
         private val KEY_REMOTE_ENABLED = booleanPreferencesKey("remote_enabled")
         private val KEY_REMOTE_PIN = stringPreferencesKey("remote_pin")
+        private val KEY_REMOTE_PIN_ISSUED_AT = longPreferencesKey("remote_pin_issued_at")
         private val KEY_REMOTE_TOKENS = stringSetPreferencesKey("remote_tokens")
         private val KEY_DEVICE_ID = stringPreferencesKey("device_id")
     }
