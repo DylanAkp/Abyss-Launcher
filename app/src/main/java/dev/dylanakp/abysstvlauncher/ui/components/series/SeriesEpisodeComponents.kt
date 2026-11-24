@@ -8,7 +8,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -91,11 +90,6 @@ fun DetailedEpisodeCard(
             }
             .clip(RoundedCornerShape(14.dp))
             .background(bgColor)
-            .border(
-                width = if (isFocused) 1.5.dp else 1.dp,
-                color = if (isFocused) Color.White else Color(0x22FFFFFF),
-                shape = RoundedCornerShape(14.dp)
-            )
             .onFocusChanged { isFocused = it.isFocused }
             .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||

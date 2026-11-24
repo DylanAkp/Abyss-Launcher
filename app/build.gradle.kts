@@ -9,6 +9,13 @@ ksp {
   arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+fun semVerToCode(name: String): Int {
+    val core = name.trim().removePrefix("v").removePrefix("V").substringBefore("-").substringBefore("+")
+    val parts = core.split(".").mapNotNull { it.toIntOrNull() }
+    if (parts.size < 2) return 0
+    return parts[0] * 10000 + parts[1] * 100 + parts.getOrElse(2) { 0 }
+}
+
 val envFile = rootProject.file(".env")
 val envProps = mutableMapOf<String, String>()
 if (envFile.exists()) {
@@ -29,7 +36,7 @@ android {
     compileSdk = 36
 
     val vName = providers.gradleProperty("versionName").getOrElse("26.11.0")
-    val vCode = providers.gradleProperty("versionCode").map { it.toInt() }.getOrElse(261100)
+    val vCode = providers.gradleProperty("versionCode").map { it.toInt() }.getOrElse(semVerToCode(vName))
 
     defaultConfig {
         applicationId = "dev.dylanakp.abysstvlauncher"

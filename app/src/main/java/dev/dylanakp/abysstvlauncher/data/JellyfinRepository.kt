@@ -1,7 +1,6 @@
 package dev.dylanakp.abysstvlauncher.data
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
 import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.domain.repository.JellyfinRepository as IJellyfinRepository
@@ -206,7 +205,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
 
     private fun resolveDeviceId(): String =
         cachedDeviceId?.takeIf { it.isNotBlank() }
-            ?: prefs.deviceId.takeIf { it.isNotBlank() }
+            ?: runCatching { prefs.deviceId.takeIf { it.isNotBlank() } }.getOrNull()
             ?: "Abyss-TV-Player"
 
     private suspend fun deviceId(): String {
@@ -239,11 +238,11 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         if (u.isBlank()) return u
 
         val hasScheme = u.contains("://")
-        val probe = Uri.parse(if (hasScheme) u else "http://$u")
-        val scheme = probe.scheme?.lowercase(Locale.ROOT)
+        val scheme = u.substringBefore("://").lowercase(Locale.ROOT).takeIf { hasScheme }
         if (hasScheme && (scheme == "http" || scheme == "https")) return u
 
-        val host = probe.host.orEmpty().ifBlank {
+        val probe = if (hasScheme) u else "http://$u"
+        val host = runCatching { java.net.URI.create(probe).host }.getOrNull().orEmpty().ifBlank {
             u.substringBefore("/").substringBefore("?").trim().trim('[', ']')
         }
         val isLocal = isLocalHost(host) || u.contains(":8096") || u.contains(":8920")
