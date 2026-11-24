@@ -22,8 +22,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 import java.io.IOException
 import java.net.URLEncoder
 
@@ -140,16 +138,17 @@ private sealed interface SeerCredential {
     }
 }
 
-object SeerRepository : ISeerRepository, KoinComponent {
+class SeerRepository(
+    private val client: OkHttpClient,
+    private val json: Json,
+    private val context: Context
+) : ISeerRepository {
 
-    private const val TMDB_IMG_W500 = "https://image.tmdb.org/t/p/w500"
-    private const val TMDB_IMG_W1280 = "https://image.tmdb.org/t/p/w1280"
-
-    private const val METADATA_CACHE_MAX = 200
-
-    private val client: OkHttpClient by inject()
-    private val json: Json by inject()
-    private val context: Context by inject()
+    companion object {
+        private const val TMDB_IMG_W500 = "https://image.tmdb.org/t/p/w500"
+        private const val TMDB_IMG_W1280 = "https://image.tmdb.org/t/p/w1280"
+        private const val METADATA_CACHE_MAX = 200
+    }
 
     private val metadataCache = object : LinkedHashMap<Pair<Boolean, Int>, Triple<String, String, String>>(
         METADATA_CACHE_MAX, 0.75f, true

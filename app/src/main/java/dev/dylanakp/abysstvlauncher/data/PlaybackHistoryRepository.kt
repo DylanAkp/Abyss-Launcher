@@ -13,22 +13,23 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import dev.dylanakp.abysstvlauncher.domain.repository.PlaybackHistoryRepository as IPlaybackHistoryRepository
-import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
-object PlaybackHistoryRepository : IPlaybackHistoryRepository, KoinComponent {
+class PlaybackHistoryRepository(
+    private val database: AbyssDatabase,
+    private val json: Json
+) : IPlaybackHistoryRepository {
 
-    private const val LEGACY_HISTORY_FILE = "playback_history.json"
-    private const val DEFAULT_EPISODE_DURATION_MS = 1_800_000L
-    private const val MIN_ESTIMATED_DURATION_MS = 3_600_000L
-    private const val UNKNOWN_DURATION_FACTOR = 10L
-    private const val RESUME_COMPLETE_RATIO = 0.96f
-    private const val ORDERING_TIMESTAMP_STEP_MS = 1L
+    companion object {
+        private const val LEGACY_HISTORY_FILE = "playback_history.json"
+        private const val DEFAULT_EPISODE_DURATION_MS = 1_800_000L
+        private const val MIN_ESTIMATED_DURATION_MS = 3_600_000L
+        private const val UNKNOWN_DURATION_FACTOR = 10L
+        private const val RESUME_COMPLETE_RATIO = 0.96f
+        private const val ORDERING_TIMESTAMP_STEP_MS = 1L
+    }
 
-    private val database: AbyssDatabase by inject()
-    private val json: Json by inject()
     private val cache = ConcurrentHashMap<String, PlaybackHistoryEntry>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val loadComplete = CompletableDeferred<Unit>()

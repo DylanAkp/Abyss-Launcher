@@ -13,8 +13,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 import java.net.URLEncoder
 import kotlin.math.roundToInt
 
@@ -87,9 +85,10 @@ private data class CurrentWeather(
     @SerialName("is_day") val isDay: Int = 1
 )
 
-object WeatherRepository : IWeatherRepository, KoinComponent {
-    private val client: OkHttpClient by inject()
-    private val json: Json by inject()
+class WeatherRepository(
+    private val client: OkHttpClient,
+    private val json: Json
+) : IWeatherRepository {
 
     private val cacheMutex = Mutex()
 

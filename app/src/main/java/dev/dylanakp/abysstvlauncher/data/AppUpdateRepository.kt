@@ -11,8 +11,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -72,32 +70,35 @@ private data class SemVer(val core: List<Int>, val prerelease: List<String>) : C
     }
 }
 
-object AppUpdateRepository : KoinComponent {
+class AppUpdateRepository(
+    private val json: Json,
+    private val baseClient: OkHttpClient
+) {
 
-    private const val REPO_OWNER = "DylanAkp"
-    private const val REPO_NAME = "Abyss-Launcher"
-    private const val LATEST_RELEASE_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
-    private val APK_ASSET_NAME = Regex("^Abyss-Launcher-.+\\.apk$", RegexOption.IGNORE_CASE)
+    companion object {
+        private const val REPO_OWNER = "DylanAkp"
+        private const val REPO_NAME = "Abyss-Launcher"
+        private const val LATEST_RELEASE_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
+        private val APK_ASSET_NAME = Regex("^Abyss-Launcher-.+\\.apk$", RegexOption.IGNORE_CASE)
 
-    private val json: Json by inject()
-    private val baseClient: OkHttpClient by inject()
+        fun parseVersionCode(version: String): Int {
+            val clean = version.trim().removePrefix("v").removePrefix("V")
+            val parts = clean.split(".")
+            return runCatching {
+                when (parts.size) {
+                    3 -> parts[0].toInt() * 10000 + parts[1].toInt() * 100 + parts[2].toInt()
+                    2 -> parts[0].toInt() * 10000 + parts[1].toInt() * 100
+                    1 -> parts[0].toInt()
+                    else -> 0
+                }
+            }.getOrDefault(0)
+        }
+    }
+
     private val client: OkHttpClient by lazy {
         baseClient.newBuilder()
             .readTimeout(30, TimeUnit.SECONDS)
             .build()
-    }
-
-    fun parseVersionCode(version: String): Int {
-        val clean = version.trim().removePrefix("v").removePrefix("V")
-        val parts = clean.split(".")
-        return runCatching {
-            when (parts.size) {
-                3 -> parts[0].toInt() * 10000 + parts[1].toInt() * 100 + parts[2].toInt()
-                2 -> parts[0].toInt() * 10000 + parts[1].toInt() * 100
-                1 -> parts[0].toInt()
-                else -> 0
-            }
-        }.getOrDefault(0)
     }
 
     private fun parseSemVer(raw: String): SemVer? {

@@ -345,6 +345,16 @@ class LauncherPreferences(private val context: Context) {
         get() = read { it[KEY_REMOTE_PIN_ISSUED_AT] ?: 0L }
         set(value) = mutate { it[KEY_REMOTE_PIN_ISSUED_AT] = value }
 
+    suspend fun getSeriesVersion(seriesId: String): String? {
+        awaitLoaded()
+        return read { it[stringPreferencesKey("series_version_$seriesId")] }
+    }
+
+    suspend fun setSeriesVersion(seriesId: String, versionId: String) {
+        mutate { it[stringPreferencesKey("series_version_$seriesId")] = versionId }
+        awaitWrites()
+    }
+
     val deviceId: String
         get() = read { prefs -> prefs[KEY_DEVICE_ID]?.takeIf { it.isNotBlank() } ?: "" }
 

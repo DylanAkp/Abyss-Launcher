@@ -20,12 +20,9 @@ import dev.dylanakp.abysstvlauncher.data.JellyfinRepository
 import dev.dylanakp.abysstvlauncher.data.JellyfinWebSocketClient
 import dev.dylanakp.abysstvlauncher.player.PlayerManager
 import androidx.annotation.StringRes
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
 import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.data.LauncherPreferences
 import dev.dylanakp.abysstvlauncher.data.LibrarySyncResult
-import dev.dylanakp.abysstvlauncher.data.launcherDataStore
 import dev.dylanakp.abysstvlauncher.data.MediaLibraryCache
 import dev.dylanakp.abysstvlauncher.data.PlaybackHistoryRepository
 import dev.dylanakp.abysstvlauncher.data.SeerRepository
@@ -61,7 +58,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -152,7 +148,14 @@ data class LauncherUiState(
 
 class LauncherViewModel(
     private val jellyfinWebSocketClient: JellyfinWebSocketClient,
-    private val playerManager: PlayerManager
+    private val playerManager: PlayerManager,
+    private val jellyfinRepository: JellyfinRepository,
+    private val seerRepository: SeerRepository,
+    private val tmdbRepository: TmdbRepository,
+    private val weatherRepository: WeatherRepository,
+    private val mediaLibraryCache: MediaLibraryCache,
+    private val playbackHistoryRepository: PlaybackHistoryRepository,
+    private val appUpdateRepository: AppUpdateRepository
 ) : ViewModel() {
 
     private var prefs: LauncherPreferences? = null
@@ -177,17 +180,16 @@ class LauncherViewModel(
     private var lastProgressPositionMs = 0L
 
     private val searchDelegate: LauncherSearchDelegate by lazy {
-        LauncherSearchDelegate(viewModelScope, _uiState) { prefs }
+        LauncherSearchDelegate(viewModelScope, _uiState, { prefs }, jellyfinRepository, seerRepository)
     }
     private val updateDelegate: LauncherUpdateDelegate by lazy {
-        LauncherUpdateDelegate(viewModelScope, _uiState) { resId: Int, args: Array<out Any> ->
+        LauncherUpdateDelegate(viewModelScope, _uiState, { resId: Int, args: Array<out Any> ->
             showStatusMessage(resId, *args)
-        }
+        }, appUpdateRepository)
     }
 
     companion object {
         private const val TRAILER_ID_PREFIX = "trailer_"
-        private const val SERIES_VERSION_KEY_PREFIX = "series_version_"
         private const val WATCH_BATCH_SIZE = 8
     }
 
@@ -213,7 +215,6 @@ class LauncherViewModel(
             preferences.awaitLoaded()
 
             val lang = preferences.language
-            preferredSeriesVersionIds = loadSeriesVersionIds()
 
             val wCity = preferences.weatherCity
             val tUnit = preferences.temperatureUnit
@@ -246,8 +247,8 @@ class LauncherViewModel(
 
             val initialTab = if (!seerConfig.isConfigured && _uiState.value.selectedTab == AbyssNavTab.DISCOVER) AbyssNavTab.HOME else _uiState.value.selectedTab
 
-            val cachedDeferred = async { MediaLibraryCache.load(context) }
-            val historyDeferred = async { PlaybackHistoryRepository.getAllEntries(context) }
+            val cachedDeferred = async { mediaLibraryCache.load(context) }
+            val historyDeferred = async { playbackHistoryRepository.getAllEntries(context) }
             val appsDeferred = async {
                 AppRepository.loadInstalledApps(
                     context,
@@ -259,6 +260,7 @@ class LauncherViewModel(
             val cached = cachedDeferred.await()
             val history = historyDeferred.await()
             val apps = appsDeferred.await()
+            preferredSeriesVersionIds = loadSeriesVersionIds(cached?.series.orEmpty().map { it.id })
 
             val enrichedMovies = applyHistoryToItems(cached?.movies.orEmpty(), history)
             val enrichedSeries = applyHistoryToItems(cached?.series.orEmpty(), history)
@@ -305,11 +307,11 @@ class LauncherViewModel(
             // 4. Background refresh of TMDB Trending
             launch {
                 try {
-                    val trending = TmdbRepository.fetchTrending()
+                    val trending = tmdbRepository.fetchTrending()
                     if (trending.isNotEmpty()) {
                         val currentMovies = _uiState.value.movies
                         val currentSeries = _uiState.value.series
-                        val enrichedTrending = TmdbRepository.enrichWithJellyfinStreams(trending, currentMovies, currentSeries)
+                        val enrichedTrending = tmdbRepository.enrichWithJellyfinStreams(trending, currentMovies, currentSeries)
                         updateLibraryState { it.copy(tmdbTrending = enrichedTrending) }
                     }
                 } catch (_: Exception) {}
@@ -328,28 +330,21 @@ class LauncherViewModel(
         }
     }
 
-    private suspend fun loadSeriesVersionIds(): Map<String, String> {
+    private suspend fun loadSeriesVersionIds(seriesIds: List<String>): Map<String, String> {
         val prefs = prefs ?: return emptyMap()
-        return prefs.dataFlow.first().asMap()
-            .filterKeys { it.name.startsWith(SERIES_VERSION_KEY_PREFIX) }
-            .mapKeys { (key, _) -> key.name.removePrefix(SERIES_VERSION_KEY_PREFIX) }
-            .mapValues { (_, value) -> value as? String ?: "" }
-            .filterValues { it.isNotBlank() }
-    }
-
-    private fun persistSeriesVersion(seriesId: String, versionId: String) {
-        val ctx = appContext ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                ctx.launcherDataStore.edit {
-                    it[stringPreferencesKey(SERIES_VERSION_KEY_PREFIX + seriesId)] = versionId
-                }
-            }.onFailure { Log.w("AbyssSeriesVersion", "Failed to persist version for $seriesId", it) }
+        return buildMap {
+            seriesIds.forEach { id ->
+                prefs.getSeriesVersion(id)?.takeIf { it.isNotBlank() }?.let { put(id, it) }
+            }
         }
     }
 
-    private fun isTrailerSession(session: PlayerSession): Boolean =
-        session.mediaItem.id.startsWith(TRAILER_ID_PREFIX)
+    private fun persistSeriesVersion(seriesId: String, versionId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { prefs?.setSeriesVersion(seriesId, versionId) }
+                .onFailure { Log.w("AbyssSeriesVersion", "Failed to persist version for $seriesId", it) }
+        }
+    }
 
     private fun needsJellyfinReAuth(result: LibrarySyncResult): Boolean = when (result) {
         is LibrarySyncResult.Success -> false
@@ -378,8 +373,8 @@ class LauncherViewModel(
                 batch.map { id ->
                     async(Dispatchers.IO) {
                         runCatching {
-                            if (watched) JellyfinRepository.markWatched(config, id)
-                            else JellyfinRepository.markUnwatched(config, id)
+                            if (watched) jellyfinRepository.markWatched(config, id)
+                            else jellyfinRepository.markUnwatched(config, id)
                         }
                     }
                 }.awaitAll()
@@ -539,7 +534,7 @@ class LauncherViewModel(
             val matchedSeries = state.series.firstOrNull {
                 it.id == item.id ||
                     (item.jellyfinId.isNotBlank() && it.jellyfinId == item.jellyfinId) ||
-                    TmdbRepository.titlesMatchSafely(it.title, item.title)
+                    tmdbRepository.titlesMatchSafely(it.title, item.title)
             }
             val target = matchedSeries ?: if (state.jellyfinConfig.isConfigured && (item.jellyfinId.isNotBlank() || item.id.isNotBlank())) {
                 item.copy(jellyfinId = item.jellyfinId.ifBlank { item.id })
@@ -560,7 +555,7 @@ class LauncherViewModel(
             val matched = state.movies.firstOrNull {
                 it.id == item.id ||
                     (item.jellyfinId.isNotBlank() && it.jellyfinId == item.jellyfinId) ||
-                    TmdbRepository.titlesMatchSafely(it.title, item.title)
+                    tmdbRepository.titlesMatchSafely(it.title, item.title)
             }
             if (matched != null && matched.streamUrl.isNotBlank()) {
                 playableMovieItem = matched
@@ -568,7 +563,7 @@ class LauncherViewModel(
                 val jfId = item.jellyfinId.ifBlank { item.id }
                 playableMovieItem = item.copy(
                     jellyfinId = jfId,
-                    streamUrl = JellyfinRepository.getStreamUrl(state.jellyfinConfig, jfId)
+                    streamUrl = jellyfinRepository.getStreamUrl(state.jellyfinConfig, jfId)
                 )
             }
         }
@@ -578,7 +573,7 @@ class LauncherViewModel(
 
     private fun launchMoviePlayback(context: Context, item: MediaItem) {
         val state = _uiState.value
-        val safeStreamUrl = JellyfinRepository.sanitizeStreamUrl(item.streamUrl, state.jellyfinConfig)
+        val safeStreamUrl = jellyfinRepository.sanitizeStreamUrl(item.streamUrl, state.jellyfinConfig)
         val safeItem = item.copy(streamUrl = safeStreamUrl)
 
         if (state.jellyfinConfig.playerPreference != PlayerPreference.ABYSS_INTERNAL) {
@@ -592,7 +587,7 @@ class LauncherViewModel(
         }
 
         viewModelScope.launch(Dispatchers.IO) {
-            val savedEntry = PlaybackHistoryRepository.getEntry(context, safeItem.id)
+            val savedEntry = playbackHistoryRepository.getEntry(context, safeItem.id)
             val savedPos = if (savedEntry != null && savedEntry.progressPercent < 0.95f) {
                 savedEntry.positionMs
             } else 0L
@@ -608,11 +603,11 @@ class LauncherViewModel(
             )
 
             val jfId = safeItem.jellyfinId.ifBlank { safeItem.id }
-            runCatching { JellyfinRepository.preparePlayback(state.jellyfinConfig, jfId) }
-            runCatching { JellyfinRepository.reportPlaybackStart(state.jellyfinConfig, jfId, savedPos) }
+            runCatching { jellyfinRepository.preparePlayback(state.jellyfinConfig, jfId) }
+            runCatching { jellyfinRepository.reportPlaybackStart(state.jellyfinConfig, jfId, savedPos) }
 
             if (savedEntry == null) {
-                PlaybackHistoryRepository.saveProgress(
+                playbackHistoryRepository.saveProgress(
                     context = context,
                     itemId = safeItem.id,
                     positionMs = 1_000L,
@@ -624,7 +619,7 @@ class LauncherViewModel(
                     category = MediaCategory.MOVIE.name
                 )
             }
-            val updatedHistory = PlaybackHistoryRepository.getAllEntries(context)
+            val updatedHistory = playbackHistoryRepository.getAllEntries(context)
             updateLibraryState { current ->
                 current.copy(
                     activePlayerSession = session,
@@ -646,7 +641,7 @@ class LauncherViewModel(
             )
         }
         movieDetailsJob = viewModelScope.launch(Dispatchers.IO) {
-            val details = JellyfinRepository.fetchMovieDetails(_uiState.value.jellyfinConfig, movieItem)
+            val details = jellyfinRepository.fetchMovieDetails(_uiState.value.jellyfinConfig, movieItem)
             if (_uiState.value.selectedMovieForDetails?.id != movieItem.id) return@launch
             _uiState.update { current ->
                 if (current.selectedMovieForDetails?.id == movieItem.id) {
@@ -678,9 +673,9 @@ class LauncherViewModel(
         val config = _uiState.value.jellyfinConfig
         val jfId = item.jellyfinId.ifBlank { item.id }
         val streamUrl = if (config.isConfigured && jfId.isNotBlank()) {
-            JellyfinRepository.getStreamUrl(config, jfId, versionId)
+            jellyfinRepository.getStreamUrl(config, jfId, versionId)
         } else {
-            JellyfinRepository.sanitizeStreamUrl(item.streamUrl, config, versionId)
+            jellyfinRepository.sanitizeStreamUrl(item.streamUrl, config, versionId)
         }
         launchMoviePlayback(context, item.copy(streamUrl = streamUrl))
     }
@@ -699,7 +694,8 @@ class LauncherViewModel(
                 rawStreamUrl = trailerUrl,
                 title = title,
                 subtitle = context.getString(R.string.cta_trailer),
-                startPositionMs = 0L
+                startPositionMs = 0L,
+                isTrailer = true
             )
             _uiState.update { it.copy(activePlayerSession = session) }
         } else {
@@ -749,13 +745,13 @@ class LauncherViewModel(
         }
         seriesDetailsJob = viewModelScope.launch(Dispatchers.IO) {
             val details = if (_uiState.value.jellyfinConfig.isConfigured) {
-                JellyfinRepository.fetchSeriesDetails(_uiState.value.jellyfinConfig, seriesItem)
+                jellyfinRepository.fetchSeriesDetails(_uiState.value.jellyfinConfig, seriesItem)
             } else null
             if (_uiState.value.selectedSeriesForEpisodes?.id != seriesItem.id) return@launch
 
             val resolvedDetails = details ?: run {
                 seriesItem.tmdbId?.let { tmdbId ->
-                    TmdbRepository.fetchSeriesDetailsFromTmdb(tmdbId, seriesItem)
+                    tmdbRepository.fetchSeriesDetailsFromTmdb(tmdbId, seriesItem)
                 }
             }
             if (_uiState.value.selectedSeriesForEpisodes?.id != seriesItem.id) return@launch
@@ -821,7 +817,7 @@ class LauncherViewModel(
             preferredSeriesVersionIds = preferredSeriesVersionIds + (seriesItem.id to chosenVersion.id)
             persistSeriesVersion(seriesItem.id, chosenVersion.id)
         }
-        val safeStreamUrl = JellyfinRepository.sanitizeStreamUrl(episode.streamUrl, config, chosenVersion?.id)
+        val safeStreamUrl = jellyfinRepository.sanitizeStreamUrl(episode.streamUrl, config, chosenVersion?.id)
         val safeEpisode = episode.copy(streamUrl = safeStreamUrl)
         val epCode = "S${safeEpisode.seasonNumber.toString().padStart(2, '0')}E${safeEpisode.episodeNumber.toString().padStart(2, '0')}"
 
@@ -856,11 +852,11 @@ class LauncherViewModel(
         )
 
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { JellyfinRepository.preparePlayback(config, safeEpisode.id) }
-            runCatching { JellyfinRepository.reportPlaybackStart(config, safeEpisode.id, startPositionMs) }
+            runCatching { jellyfinRepository.preparePlayback(config, safeEpisode.id) }
+            runCatching { jellyfinRepository.reportPlaybackStart(config, safeEpisode.id, startPositionMs) }
 
             if (startPositionMs <= 0L) {
-                PlaybackHistoryRepository.saveProgress(
+                playbackHistoryRepository.saveProgress(
                     context = ctx,
                     itemId = episode.id,
                     positionMs = 1_000L,
@@ -876,7 +872,7 @@ class LauncherViewModel(
                     category = MediaCategory.SERIES.name
                 )
             }
-            val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
+            val updatedHistory = playbackHistoryRepository.getAllEntries(ctx)
             updateLibraryState { current ->
                 current.copy(
                     activePlayerSession = session,
@@ -896,7 +892,7 @@ class LauncherViewModel(
             val seriesDetails = _uiState.value.activeSeriesDetails ?: run {
                 val config = _uiState.value.jellyfinConfig
                 val dummyItem = currentSession.mediaItem.copy(id = seriesId, category = MediaCategory.SERIES)
-                JellyfinRepository.fetchSeriesDetails(config, dummyItem)
+                jellyfinRepository.fetchSeriesDetails(config, dummyItem)
             }
             val allEps = seriesDetails?.seasons?.flatMap { it.episodes }.orEmpty()
             val targetNext = nextEpisode ?: run {
@@ -944,15 +940,15 @@ class LauncherViewModel(
         if (itemId == progressSessionId && positionMs <= lastProgressPositionMs) return
         progressSessionId = itemId
         lastProgressPositionMs = positionMs
-        val isTrailer = isTrailerSession(session)
+        val isTrailer = session.isTrailer
         val config = _uiState.value.jellyfinConfig
 
         viewModelScope.launch(Dispatchers.IO) {
             if (!isTrailer) {
-                runCatching { JellyfinRepository.reportPlaybackProgress(config, itemId, positionMs, isPaused) }
+                runCatching { jellyfinRepository.reportPlaybackProgress(config, itemId, positionMs, isPaused) }
                     .onFailure { Log.w("AbyssPlayback", "Progress report failed for $itemId", it) }
                 runCatching {
-                    PlaybackHistoryRepository.saveProgress(
+                    playbackHistoryRepository.saveProgress(
                         context = ctx,
                         itemId = itemId,
                         positionMs = positionMs,
@@ -978,16 +974,16 @@ class LauncherViewModel(
         _uiState.update { it.copy(activePlayerSession = null) }
         progressSessionId = ""
         if (ctx == null || (durationMs <= 0L && positionMs <= 0L)) return
-        val isTrailer = isTrailerSession(session)
+        val isTrailer = session.isTrailer
         val itemId = session.mediaItem.id
         val jfConfig = _uiState.value.jellyfinConfig
 
         viewModelScope.launch(Dispatchers.IO) {
             if (isTrailer) return@launch
-            runCatching { JellyfinRepository.reportPlaybackStopped(jfConfig, itemId, positionMs) }
+            runCatching { jellyfinRepository.reportPlaybackStopped(jfConfig, itemId, positionMs) }
                 .onFailure { Log.w("AbyssPlayback", "Stop report failed for $itemId", it) }
             runCatching {
-                PlaybackHistoryRepository.saveProgress(
+                playbackHistoryRepository.saveProgress(
                     context = ctx,
                     itemId = itemId,
                     positionMs = positionMs,
@@ -1003,7 +999,7 @@ class LauncherViewModel(
                     category = if (session.seriesId.isNotBlank()) MediaCategory.SERIES.name else MediaCategory.MOVIE.name
                 )
             }.onFailure { Log.w("AbyssPlayback", "Stop history save failed for $itemId", it) }
-            val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
+            val updatedHistory = playbackHistoryRepository.getAllEntries(ctx)
             updateLibraryState { current ->
                 current.copy(
                     movies = applyHistoryToItems(current.movies, updatedHistory),
@@ -1018,13 +1014,13 @@ class LauncherViewModel(
         val config = _uiState.value.jellyfinConfig
         val jfId = item.jellyfinId.ifBlank { item.id }
         val resolved = if (item.streamUrl.isBlank() && config.isConfigured && jfId.isNotBlank()) {
-            item.copy(jellyfinId = jfId, streamUrl = JellyfinRepository.getStreamUrl(config, jfId))
+            item.copy(jellyfinId = jfId, streamUrl = jellyfinRepository.getStreamUrl(config, jfId))
         } else {
-            item.copy(streamUrl = JellyfinRepository.sanitizeStreamUrl(item.streamUrl, config))
+            item.copy(streamUrl = jellyfinRepository.sanitizeStreamUrl(item.streamUrl, config))
         }
         if (config.isConfigured && jfId.isNotBlank()) {
             viewModelScope.launch(Dispatchers.IO) {
-                JellyfinRepository.preparePlayback(config, jfId)
+                jellyfinRepository.preparePlayback(config, jfId)
             }
         }
         _uiState.update { it.copy(selectedMediaForDetails = resolved) }
@@ -1110,7 +1106,7 @@ class LauncherViewModel(
 
             // 1. Authenticate if token missing
             var activeConfig = if (config.accessToken.isBlank() && config.username.isNotBlank()) {
-                val authRes = JellyfinRepository.authenticate(config)
+                val authRes = jellyfinRepository.authenticate(config)
                 if (authRes.isSuccess) {
                     val authed = authRes.getOrThrow()
                     prefs?.jellyfinConfig = authed
@@ -1132,24 +1128,24 @@ class LauncherViewModel(
                 config
             }
 
-            var syncResult = JellyfinRepository.syncLibraryDetailed(activeConfig)
+            var syncResult = jellyfinRepository.syncLibraryDetailed(activeConfig)
 
             if (needsJellyfinReAuth(syncResult)
                 && activeConfig.username.isNotBlank() && activeConfig.password.isNotBlank()
             ) {
                 Log.i("AbyssJellyfin", "Sync requires re-auth; re-authenticating with server...")
-                val reAuthRes = JellyfinRepository.authenticate(activeConfig.copy(accessToken = ""))
+                val reAuthRes = jellyfinRepository.authenticate(activeConfig.copy(accessToken = ""))
                 if (reAuthRes.isSuccess) {
                     activeConfig = reAuthRes.getOrThrow()
                     prefs?.jellyfinConfig = activeConfig
                     prefs?.awaitWrites()
                     _uiState.update { it.copy(jellyfinConfig = activeConfig) }
                     jellyfinWebSocketClient.connect(activeConfig)
-                    syncResult = JellyfinRepository.syncLibraryDetailed(activeConfig)
+                    syncResult = jellyfinRepository.syncLibraryDetailed(activeConfig)
                 }
             }
 
-            val resumeItems = runCatching { JellyfinRepository.fetchResumeAndNextUp(activeConfig) }
+            val resumeItems = runCatching { jellyfinRepository.fetchResumeAndNextUp(activeConfig) }
                 .getOrDefault(emptyList())
 
             if (syncResult is LibrarySyncResult.Success) {
@@ -1169,7 +1165,7 @@ class LauncherViewModel(
                 prefs?.jellyfinConfig = updatedConfig
 
                 appContext?.let { ctx ->
-                    MediaLibraryCache.save(ctx, lib)
+                    mediaLibraryCache.save(ctx, lib)
                 }
 
                 rawJellyfinResumeItems = resumeItems
@@ -1209,7 +1205,7 @@ class LauncherViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             prefs?.awaitWrites()
-            val testRes = SeerRepository.testConnection(updated)
+            val testRes = seerRepository.testConnection(updated)
             withContext(Dispatchers.Main) {
                 _uiState.update { it.copy(isTestingSeer = false) }
                 if (testRes.isSuccess) {
@@ -1227,7 +1223,7 @@ class LauncherViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val jf = _uiState.value.jellyfinConfig
             var activeConfig = if (config.apiKey.isBlank() && config.serverUrl.isNotBlank() && jf.isConfigured) {
-                val authRes = SeerRepository.authenticateWithJellyfin(config.serverUrl, jf.username, jf.password)
+                val authRes = seerRepository.authenticateWithJellyfin(config.serverUrl, jf.username, jf.password)
                 if (authRes.isSuccess) {
                     val key = authRes.getOrThrow()
                     val authed = config.copy(apiKey = key)
@@ -1245,10 +1241,10 @@ class LauncherViewModel(
 
             Log.d("AbyssSeer", "Syncing Seer data from ${activeConfig.serverUrl}...")
             suspend fun fetchSeerBatch(cfg: SeerConfig) = coroutineScope {
-                val t = async { runCatching { SeerRepository.fetchTrending(cfg) } }
-                val m = async { runCatching { SeerRepository.fetchDiscoverMovies(cfg) } }
-                val tv = async { runCatching { SeerRepository.fetchDiscoverTv(cfg) } }
-                val r = async { runCatching { SeerRepository.fetchRequests(cfg) } }
+                val t = async { runCatching { seerRepository.fetchTrending(cfg) } }
+                val m = async { runCatching { seerRepository.fetchDiscoverMovies(cfg) } }
+                val tv = async { runCatching { seerRepository.fetchDiscoverTv(cfg) } }
+                val r = async { runCatching { seerRepository.fetchRequests(cfg) } }
                 listOf(t.await(), m.await(), tv.await(), r.await())
             }
 
@@ -1262,7 +1258,7 @@ class LauncherViewModel(
 
             if (isAuthFailed && jf.isConfigured && jf.username.isNotBlank()) {
                 Log.i("AbyssSeer", "Seer sync failed (trending/movies/tv/requests); re-authenticating with Jellyfin credentials...")
-                val reAuthRes = SeerRepository.authenticateWithJellyfin(activeConfig.serverUrl, jf.username, jf.password)
+                val reAuthRes = seerRepository.authenticateWithJellyfin(activeConfig.serverUrl, jf.username, jf.password)
                 if (reAuthRes.isSuccess) {
                     val newKey = reAuthRes.getOrThrow()
                     activeConfig = activeConfig.copy(apiKey = newKey)
@@ -1295,9 +1291,9 @@ class LauncherViewModel(
             val curMovies = _uiState.value.movies
             val curSeries = _uiState.value.series
 
-            val enrichedTrending = TmdbRepository.enrichWithJellyfinStreams(trending, curMovies, curSeries)
-            val enrichedPopMovies = TmdbRepository.enrichWithJellyfinStreams(popMovies, curMovies, curSeries)
-            val enrichedPopTv = TmdbRepository.enrichWithJellyfinStreams(popTv, curMovies, curSeries)
+            val enrichedTrending = tmdbRepository.enrichWithJellyfinStreams(trending, curMovies, curSeries)
+            val enrichedPopMovies = tmdbRepository.enrichWithJellyfinStreams(popMovies, curMovies, curSeries)
+            val enrichedPopTv = tmdbRepository.enrichWithJellyfinStreams(popTv, curMovies, curSeries)
 
             val updatedConfig = activeConfig.copy(
                 lastSyncTimestamp = System.currentTimeMillis(),
@@ -1306,14 +1302,14 @@ class LauncherViewModel(
             prefs?.seerConfig = updatedConfig
 
             appContext?.let { ctx ->
-                val currentLib = MediaLibraryCache.load(ctx)
+                val currentLib = mediaLibraryCache.load(ctx)
                 val updatedLib = (currentLib ?: SyncedLibrary()).copy(
                     seerTrending = enrichedTrending,
                     seerPopularMovies = enrichedPopMovies,
                     seerPopularTv = enrichedPopTv,
                     seerRequests = requests
                 )
-                MediaLibraryCache.save(ctx, updatedLib)
+                mediaLibraryCache.save(ctx, updatedLib)
             }
 
             updateLibraryState { current ->
@@ -1345,7 +1341,7 @@ class LauncherViewModel(
 
                 val activeConfig = _uiState.value.seerConfig
                 if (activeConfig.isConfigured && activeConfig.apiKey.isNotBlank()) {
-                    val requests = SeerRepository.fetchRequests(activeConfig)
+                    val requests = seerRepository.fetchRequests(activeConfig)
                     _uiState.update { it.copy(seerRequests = requests) }
 
                     // If a download finished (requests became available in Jellyfin), refresh Jellyfin library
@@ -1414,7 +1410,7 @@ class LauncherViewModel(
                 jellyfinWebSocketClient.reconnectIfNeeded()
             }
             viewModelScope.launch(Dispatchers.IO) {
-                val resumeItems = runCatching { JellyfinRepository.fetchResumeAndNextUp(jfConfig) }.getOrNull()
+                val resumeItems = runCatching { jellyfinRepository.fetchResumeAndNextUp(jfConfig) }.getOrNull()
                 if (resumeItems != null) {
                     rawJellyfinResumeItems = resumeItems
                     updateLibraryState { it }
@@ -1436,7 +1432,7 @@ class LauncherViewModel(
         val isTv = item.category == MediaCategory.SERIES
 
         viewModelScope.launch(Dispatchers.IO) {
-            val res = SeerRepository.requestMedia(config, tmdbId, isTv)
+            val res = seerRepository.requestMedia(config, tmdbId, isTv)
             withContext(Dispatchers.Main) {
                 if (res.isSuccess) {
                     showStatusMessage(R.string.msg_seer_request_success, durationMs = 3500L)
@@ -1457,8 +1453,8 @@ class LauncherViewModel(
     fun removeFromContinueWatching(item: MediaItem) {
         val ctx = appContext ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            PlaybackHistoryRepository.clearEntry(ctx, item.id)
-            val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
+            playbackHistoryRepository.clearEntry(ctx, item.id)
+            val updatedHistory = playbackHistoryRepository.getAllEntries(ctx)
             rawJellyfinResumeItems = rawJellyfinResumeItems.filter { it.id != item.id }
             updateLibraryState { current ->
                 current.copy(
@@ -1473,23 +1469,23 @@ class LauncherViewModel(
     fun toggleMediaWatchedStatus(item: MediaItem) {
         val ctx = appContext ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            val hist = PlaybackHistoryRepository.getEntry(ctx, item.id)
+            val hist = playbackHistoryRepository.getEntry(ctx, item.id)
             val isWatched = (hist?.progressPercent ?: 0f) >= 0.95f
             val jfConfig = _uiState.value.jellyfinConfig
 
             val jfId = item.jellyfinId.ifBlank { item.id }
-            PlaybackHistoryRepository.clearEntry(ctx, item.id)
+            playbackHistoryRepository.clearEntry(ctx, item.id)
             rawJellyfinResumeItems = rawJellyfinResumeItems.filter { it.id != jfId && it.jellyfinId != jfId }
             runCatching {
-                if (isWatched) JellyfinRepository.markUnwatched(jfConfig, jfId)
-                else JellyfinRepository.markWatched(jfConfig, jfId)
+                if (isWatched) jellyfinRepository.markUnwatched(jfConfig, jfId)
+                else jellyfinRepository.markWatched(jfConfig, jfId)
             }.onFailure { Log.w("AbyssWatched", "Jellyfin watched toggle failed for $jfId", it) }
             showStatusMessage(
                 if (isWatched) R.string.msg_marked_single_unwatched else R.string.msg_marked_single_watched,
                 durationMs = 2500L
             )
 
-            val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
+            val updatedHistory = playbackHistoryRepository.getAllEntries(ctx)
             val watched = !isWatched
             updateLibraryState { current ->
                 current.copy(
@@ -1545,7 +1541,7 @@ class LauncherViewModel(
         val jfConfig = _uiState.value.jellyfinConfig
 
         viewModelScope.launch(Dispatchers.IO) {
-            PlaybackHistoryRepository.markEpisodesUpToWatched(
+            playbackHistoryRepository.markEpisodesUpToWatched(
                 context = ctx,
                 seriesId = seriesItem.id,
                 allEpisodes = allEpisodes,
@@ -1555,7 +1551,7 @@ class LauncherViewModel(
                 backdropUrl = seriesItem.backdropUrl.ifBlank { seriesItem.posterUrl },
                 category = MediaCategory.SERIES.name
             )
-            val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
+            val updatedHistory = playbackHistoryRepository.getAllEntries(ctx)
             updateLibraryState { current ->
                 current.copy(
                     movies = applyHistoryToItems(current.movies, updatedHistory),
@@ -1582,11 +1578,11 @@ class LauncherViewModel(
         val jfConfig = _uiState.value.jellyfinConfig
 
         viewModelScope.launch(Dispatchers.IO) {
-            val targetEntry = PlaybackHistoryRepository.getEntry(ctx, targetEpisode.id)
+            val targetEntry = playbackHistoryRepository.getEntry(ctx, targetEpisode.id)
             val isCurrentlyWatched = (targetEntry?.progressPercent ?: 0f) >= 0.95f ||
                     (targetEpisode.progressPercent >= 0.95f && targetEntry == null)
             if (isCurrentlyWatched) {
-                PlaybackHistoryRepository.unmarkEpisodeWatched(
+                playbackHistoryRepository.unmarkEpisodeWatched(
                     context = ctx,
                     seriesId = seriesItem.id,
                     allEpisodes = allEpisodes,
@@ -1597,7 +1593,7 @@ class LauncherViewModel(
                     category = MediaCategory.SERIES.name
                 )
             } else {
-                PlaybackHistoryRepository.markSingleEpisodeWatched(
+                playbackHistoryRepository.markSingleEpisodeWatched(
                     context = ctx,
                     seriesId = seriesItem.id,
                     allEpisodes = allEpisodes,
@@ -1609,7 +1605,7 @@ class LauncherViewModel(
                 )
             }
 
-            val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
+            val updatedHistory = playbackHistoryRepository.getAllEntries(ctx)
             updateLibraryState { current ->
                 current.copy(
                     movies = applyHistoryToItems(current.movies, updatedHistory),
@@ -1634,7 +1630,7 @@ class LauncherViewModel(
         val jfConfig = _uiState.value.jellyfinConfig
 
         viewModelScope.launch(Dispatchers.IO) {
-            PlaybackHistoryRepository.unmarkEpisodesFrom(
+            playbackHistoryRepository.unmarkEpisodesFrom(
                 context = ctx,
                 seriesId = seriesItem.id,
                 allEpisodes = allEpisodes,
@@ -1645,7 +1641,7 @@ class LauncherViewModel(
                 category = MediaCategory.SERIES.name
             )
 
-            val updatedHistory = PlaybackHistoryRepository.getAllEntries(ctx)
+            val updatedHistory = playbackHistoryRepository.getAllEntries(ctx)
             updateLibraryState { current ->
                 current.copy(
                     movies = applyHistoryToItems(current.movies, updatedHistory),
@@ -1667,7 +1663,7 @@ class LauncherViewModel(
         val city = newCity.trim().ifBlank { "Paris" }
         prefs?.weatherCity = city
         _uiState.update { it.copy(weatherCity = city) }
-        WeatherRepository.clearCache()
+        weatherRepository.clearCache()
         fetchWeather(city)
     }
 
@@ -1680,7 +1676,7 @@ class LauncherViewModel(
 
     private fun fetchWeather(city: String) {
         viewModelScope.launch {
-            val info = WeatherRepository.getWeather(city)
+            val info = weatherRepository.getWeather(city)
             _uiState.update { it.copy(weatherInfo = info) }
         }
     }
@@ -1691,7 +1687,7 @@ class LauncherViewModel(
             while (isActive) {
                 delay(30 * 60 * 1000L)
                 val city = prefs?.weatherCity ?: "Paris"
-                val info = WeatherRepository.getWeather(city)
+                val info = weatherRepository.getWeather(city)
                 _uiState.update { it.copy(weatherInfo = info) }
             }
         }
@@ -1701,8 +1697,8 @@ class LauncherViewModel(
         prefs?.language = lang
         _uiState.update { it.copy(language = lang) }
         viewModelScope.launch {
-            SeerRepository.clearCache()
-            appContext?.let { MediaLibraryCache.clear(it) }
+            seerRepository.clearCache()
+            appContext?.let { mediaLibraryCache.clear(it) }
             syncJellyfinLibrary(_uiState.value.jellyfinConfig, showToast = false)
             syncSeerData(_uiState.value.seerConfig)
         }

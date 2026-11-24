@@ -22,8 +22,6 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
@@ -90,17 +88,11 @@ private data class TmdbVideoDto(
     val name: String = "Trailer"
 )
 
-object TmdbRepository : ITmdbRepository, KoinComponent {
+class TmdbRepository(
+    private val client: OkHttpClient,
+    private val json: Json
+) : ITmdbRepository {
 
-    private val client: OkHttpClient by inject()
-    private val json: Json by inject()
-
-    private val API_KEY: String = BuildConfig.TMDB_API_KEY
-    private const val BASE_URL = "https://api.themoviedb.org/3"
-    private const val IMG_W1280 = "https://image.tmdb.org/t/p/w1280"
-    private const val IMG_W780 = "https://image.tmdb.org/t/p/w780"
-
-    private const val MAX_PARALLEL_SEASON_REQUESTS = 4
     private val seasonRequestSemaphore = Semaphore(MAX_PARALLEL_SEASON_REQUESTS)
     private val apiKeyWarningLogged = AtomicBoolean(false)
 
@@ -112,48 +104,71 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
         return false
     }
 
-    private val RE_DIACRITICS = Regex("\\p{InCombiningDiacriticalMarks}+")
-    private val RE_ROMAN_II = Regex("\\bii\\b")
-    private val RE_ROMAN_III = Regex("\\biii\\b")
-    private val RE_ROMAN_IV = Regex("\\biv\\b")
-    private val RE_YEAR_PARENS = Regex("[(\\[]\\s*\\d{4}\\s*[)\\]]")
-    private val RE_PREFIX_TAGS = Regex("^(fr|vf|vostfr|vost|stfr|multi|vff|vo|fhd|uhd|4k|hevc)\\s*[-:|/]\\s*")
-    private val RE_WORD_TAGS = Regex("\\b(fr|vf|vostfr|vost|stfr|multi|vff|vo|fhd|uhd|4k|hevc|1080p|720p|top 100|nouveautes|nouveaute)\\b")
-    private val RE_NON_ALNUM = Regex("[^a-z0-9]")
-    private val RE_WHITESPACE = Regex("\\s+")
+    override fun cleanTitleForMatching(raw: String): String = Companion.cleanTitleForMatching(raw)
 
-    override fun cleanTitleForMatching(raw: String): String {
-        var t = Normalizer.normalize(raw, Normalizer.Form.NFD)
-            .replace(RE_DIACRITICS, "")
-            .lowercase(Locale.ROOT)
-            .trim()
+    override fun titlesMatchSafely(titleA: String, titleB: String): Boolean =
+        Companion.titlesMatchSafely(titleA, titleB)
 
-        t = t.replace(RE_ROMAN_II, "2")
-            .replace(RE_ROMAN_III, "3")
-            .replace(RE_ROMAN_IV, "4")
-            .replace(RE_YEAR_PARENS, " ")
-            .replace(RE_PREFIX_TAGS, " ")
-            .replace(RE_WORD_TAGS, " ")
-            .replace(RE_NON_ALNUM, " ")
+    companion object {
+        private val API_KEY: String = BuildConfig.TMDB_API_KEY
+        private const val BASE_URL = "https://api.themoviedb.org/3"
+        private const val IMG_W1280 = "https://image.tmdb.org/t/p/w1280"
+        private const val IMG_W780 = "https://image.tmdb.org/t/p/w780"
+        private const val MAX_PARALLEL_SEASON_REQUESTS = 4
 
-        return t.replace(RE_WHITESPACE, " ").trim()
-    }
+        private val RE_DIACRITICS = Regex("\\p{InCombiningDiacriticalMarks}+")
+        private val RE_ROMAN_II = Regex("\\bii\\b")
+        private val RE_ROMAN_III = Regex("\\biii\\b")
+        private val RE_ROMAN_IV = Regex("\\biv\\b")
+        private val RE_YEAR_PARENS = Regex("[(\\[]\\s*\\d{4}\\s*[)\\]]")
+        private val RE_PREFIX_TAGS = Regex("^(fr|vf|vostfr|vost|stfr|multi|vff|vo|fhd|uhd|4k|hevc)\\s*[-:|/]\\s*")
+        private val RE_WORD_TAGS = Regex("\\b(fr|vf|vostfr|vost|stfr|multi|vff|vo|fhd|uhd|4k|hevc|1080p|720p|top 100|nouveautes|nouveaute)\\b")
+        private val RE_NON_ALNUM = Regex("[^a-z0-9]")
+        private val RE_WHITESPACE = Regex("\\s+")
 
-    override fun titlesMatchSafely(titleA: String, titleB: String): Boolean {
-        if (titleA.isBlank() || titleB.isBlank()) return false
-        val a = cleanTitleForMatching(titleA)
-        val b = cleanTitleForMatching(titleB)
-        if (a.isBlank() || b.isBlank()) return false
-        if (a == b) return true
-        if (a.replace(" ", "") == b.replace(" ", "")) return true
+        fun cleanTitleForMatching(raw: String): String {
+            var t = Normalizer.normalize(raw, Normalizer.Form.NFD)
+                .replace(RE_DIACRITICS, "")
+                .lowercase(Locale.ROOT)
+                .trim()
 
-        val shorter = if (a.length <= b.length) a else b
-        val longer = if (a.length <= b.length) b else a
+            t = t.replace(RE_ROMAN_II, "2")
+                .replace(RE_ROMAN_III, "3")
+                .replace(RE_ROMAN_IV, "4")
+                .replace(RE_YEAR_PARENS, " ")
+                .replace(RE_PREFIX_TAGS, " ")
+                .replace(RE_WORD_TAGS, " ")
+                .replace(RE_NON_ALNUM, " ")
 
-        if (shorter.length >= 6 && longer.startsWith("$shorter ")) {
+            return t.replace(RE_WHITESPACE, " ").trim()
+        }
+
+        fun titlesMatchSafely(titleA: String, titleB: String): Boolean {
+            if (titleA.isBlank() || titleB.isBlank()) return false
+            val a = cleanTitleForMatching(titleA)
+            val b = cleanTitleForMatching(titleB)
+            if (a.isBlank() || b.isBlank()) return false
+            if (a == b) return true
+            if (a.replace(" ", "") == b.replace(" ", "")) return true
+
+            val shorter = if (a.length <= b.length) a else b
+            val longer = if (a.length <= b.length) b else a
+
+            if (shorter.length >= 6 && longer.startsWith("$shorter ")) {
+                return true
+            }
+            return false
+        }
+
+        fun metadataAgrees(a: MediaItem, b: MediaItem): Boolean {
+            val aYear = a.year.take(4).toIntOrNull()
+            val bYear = b.year.take(4).toIntOrNull()
+            if (aYear != null && bYear != null && aYear != bYear) return false
+            val aRating = a.rating.toFloatOrNull()
+            val bRating = b.rating.toFloatOrNull()
+            if (aRating != null && bRating != null && abs(aRating - bRating) > 1.0f) return false
             return true
         }
-        return false
     }
 
     override suspend fun fetchTrending(): List<MediaItem> = withContext(Dispatchers.IO) {
@@ -178,16 +193,6 @@ object TmdbRepository : ITmdbRepository, KoinComponent {
         val url = "$BASE_URL/tv/popular?api_key=$API_KEY&language=$lang&page=1"
         val raw = httpGet(url) ?: return@withContext emptyList()
         parseTmdbResults(raw, forcedCategory = MediaCategory.SERIES)
-    }
-
-    private fun metadataAgrees(a: MediaItem, b: MediaItem): Boolean {
-        val aYear = a.year.take(4).toIntOrNull()
-        val bYear = b.year.take(4).toIntOrNull()
-        if (aYear != null && bYear != null && aYear != bYear) return false
-        val aRating = a.rating.toFloatOrNull()
-        val bRating = b.rating.toFloatOrNull()
-        if (aRating != null && bRating != null && abs(aRating - bRating) > 1.0f) return false
-        return true
     }
 
     private class PoolIndex(pool: List<MediaItem>) {

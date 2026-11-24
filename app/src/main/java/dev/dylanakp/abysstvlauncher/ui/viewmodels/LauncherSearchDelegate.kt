@@ -15,7 +15,9 @@ import kotlinx.coroutines.launch
 internal class LauncherSearchDelegate(
     private val scope: CoroutineScope,
     private val uiState: MutableStateFlow<LauncherUiState>,
-    private val getPrefs: () -> LauncherPreferences?
+    private val getPrefs: () -> LauncherPreferences?,
+    private val jellyfinRepository: JellyfinRepository,
+    private val seerRepository: SeerRepository
 ) {
     private var searchJob: Job? = null
 
@@ -35,7 +37,7 @@ internal class LauncherSearchDelegate(
             val jfConfig = uiState.value.jellyfinConfig
 
             val jfRemoteResults = if (jfConfig.isConfigured) {
-                JellyfinRepository.search(jfConfig, q)
+                jellyfinRepository.search(jfConfig, q)
             } else emptyList()
 
             val matchedMov = if (jfRemoteResults.isEmpty()) {
@@ -46,7 +48,7 @@ internal class LauncherSearchDelegate(
             } else emptyList()
 
             val seerResults = if (uiState.value.seerConfig.isConfigured) {
-                SeerRepository.search(uiState.value.seerConfig, q)
+                seerRepository.search(uiState.value.seerConfig, q)
             } else emptyList()
 
             val combined = (jfRemoteResults + matchedMov + matchedSer + seerResults).distinctBy { it.id }

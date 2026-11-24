@@ -61,14 +61,20 @@ val appModule = module {
 
     single { LauncherPreferences(androidContext()) }
 
-    single<IJellyfinRepository> { JellyfinRepository }
+    single { JellyfinRepository(get(), get(), get(), get(), get()) }
+    single<IJellyfinRepository> { get<JellyfinRepository>() }
     single { JellyfinWebSocketClient(get(), get(), get()) }
-    single<ISeerRepository> { SeerRepository }
-    single<ITmdbRepository> { TmdbRepository }
-    single<IWeatherRepository> { WeatherRepository }
-    single<IMediaLibraryCache> { MediaLibraryCache }
-    single<IPlaybackHistoryRepository> { PlaybackHistoryRepository }
-    single { AppUpdateRepository }
+    single { SeerRepository(get(), get(), get()) }
+    single<ISeerRepository> { get<SeerRepository>() }
+    single { TmdbRepository(get(), get()) }
+    single<ITmdbRepository> { get<TmdbRepository>() }
+    single { WeatherRepository(get(), get()) }
+    single<IWeatherRepository> { get<WeatherRepository>() }
+    single { MediaLibraryCache(get(), get()) }
+    single<IMediaLibraryCache> { get<MediaLibraryCache>() }
+    single { PlaybackHistoryRepository(get(), get()) }
+    single<IPlaybackHistoryRepository> { get<PlaybackHistoryRepository>() }
+    single { AppUpdateRepository(get(), get()) }
 
     single<PlayerManager> { PlayerManagerImpl(androidContext(), get()) }
 

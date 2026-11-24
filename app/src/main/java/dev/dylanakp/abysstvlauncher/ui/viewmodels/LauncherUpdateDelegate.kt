@@ -15,13 +15,14 @@ import kotlinx.coroutines.launch
 internal class LauncherUpdateDelegate(
     private val scope: CoroutineScope,
     private val uiState: MutableStateFlow<LauncherUiState>,
-    private val showStatusMessage: (Int, Array<out Any>) -> Unit
+    private val showStatusMessage: (Int, Array<out Any>) -> Unit,
+    private val appUpdateRepository: AppUpdateRepository
 ) {
     fun checkForUpdates(silent: Boolean = false) {
         if (uiState.value.isCheckingUpdates) return
         uiState.update { it.copy(isCheckingUpdates = true) }
         scope.launch {
-            AppUpdateRepository.checkLatestRelease()
+            appUpdateRepository.checkLatestRelease()
                 .onSuccess { update ->
                     uiState.update { it.copy(isCheckingUpdates = false) }
                     if (update != null) {
@@ -69,11 +70,11 @@ internal class LauncherUpdateDelegate(
             )
         }
         scope.launch {
-            AppUpdateRepository.downloadApk(context, update.apkUrl) { progress ->
+            appUpdateRepository.downloadApk(context, update.apkUrl) { progress ->
                 uiState.update { it.copy(updateDownloadProgress = progress) }
             }.onSuccess { apkFile ->
                 uiState.update { it.copy(isDownloadingUpdate = false) }
-                when (val result = AppUpdateRepository.triggerInstall(context, apkFile)) {
+                when (val result = appUpdateRepository.triggerInstall(context, apkFile)) {
                     InstallResult.Success -> dismissUpdate()
                     InstallResult.NeedsPermission ->
                         showStatusMessage(R.string.update_needs_permission, emptyArray())

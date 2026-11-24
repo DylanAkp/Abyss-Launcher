@@ -12,14 +12,15 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 import dev.dylanakp.abysstvlauncher.domain.repository.MediaLibraryCache as IMediaLibraryCache
-import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 
-object MediaLibraryCache : IMediaLibraryCache, KoinComponent {
+class MediaLibraryCache(
+    private val database: AbyssDatabase,
+    private val json: Json
+) : IMediaLibraryCache {
 
-    private const val LEGACY_CACHE_FILE = "synced_library.json"
-    private val database: AbyssDatabase by inject()
-    private val json: Json by inject()
+    companion object {
+        private const val LEGACY_CACHE_FILE = "synced_library.json"
+    }
 
     override suspend fun clear(context: Context?): Unit = withContext(Dispatchers.IO) {
         runCatching {

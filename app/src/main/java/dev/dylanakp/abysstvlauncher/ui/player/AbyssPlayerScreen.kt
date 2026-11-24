@@ -111,6 +111,7 @@ data class PlayerSession(
     val subtitle: String = "",
     val startPositionMs: Long = 0L,
     val savedResumePositionMs: Long = 0L,
+    val isTrailer: Boolean = false,
     val seriesId: String = "",
     val seasonNumber: Int = 0,
     val episodeNumber: Int = 0,

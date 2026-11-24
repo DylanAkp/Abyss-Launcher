@@ -34,8 +34,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 import java.io.IOException
 import java.net.URLEncoder
 import java.util.Locale
@@ -189,16 +187,13 @@ private sealed interface FetchOutcome {
     data class Failed(val httpCode: Int?) : FetchOutcome
 }
 
-object JellyfinRepository : IJellyfinRepository, KoinComponent {
-
-    private const val CLIENT_NAME = "AbyssLauncher"
-    private const val DEVICE_NAME = "Android TV"
-    private const val CLIENT_VERSION = "2.0.0"
-
-    private val client: OkHttpClient by inject()
-    private val json: Json by inject()
-    private val prefs: LauncherPreferences by inject()
-    private val appContext: Context by inject()
+class JellyfinRepository(
+    private val client: OkHttpClient,
+    private val json: Json,
+    private val prefs: LauncherPreferences,
+    private val appContext: Context,
+    private val tmdbRepository: TmdbRepository
+) : IJellyfinRepository {
 
     @Volatile
     private var cachedDeviceId: String? = null
@@ -218,85 +213,115 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
 
     private fun resString(id: Int, vararg args: Any): String = appContext.getString(id, *args)
 
-    private fun isLocalHost(host: String): Boolean {
-        if (host.equals("localhost", ignoreCase = true)) return true
-        if (host.contains(":")) {
-            val h = host.lowercase(Locale.ROOT)
-            return h == "::1" || h == "0:0:0:0:0:0:0:1" ||
-                h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd")
-        }
-        val parts = host.split(".")
-        if (parts.size != 4) return false
-        val a = parts[0].toIntOrNull() ?: return false
-        val b = parts[1].toIntOrNull() ?: return false
-        return a == 10 || a == 127 || (a == 192 && b == 168) ||
-            (a == 172 && b in 16..31) || (a == 169 && b == 254) || (a == 0 && b == 0)
-    }
+    override fun cleanUrl(raw: String): String = Companion.cleanUrl(raw)
 
-    override fun cleanUrl(raw: String): String {
-        val u = raw.trim().trimEnd('/')
-        if (u.isBlank()) return u
+    override fun getStreamUrl(config: JellyfinConfig, itemId: String, mediaSourceId: String?): String =
+        Companion.getStreamUrl(config, itemId, mediaSourceId)
 
-        val hasScheme = u.contains("://")
-        val scheme = u.substringBefore("://").lowercase(Locale.ROOT).takeIf { hasScheme }
-        if (hasScheme && (scheme == "http" || scheme == "https")) return u
+    override fun sanitizeStreamUrl(streamUrl: String, config: JellyfinConfig, mediaSourceId: String?): String =
+        Companion.sanitizeStreamUrl(streamUrl, config, mediaSourceId)
 
-        val probe = if (hasScheme) u else "http://$u"
-        val host = runCatching { java.net.URI.create(probe).host }.getOrNull().orEmpty().ifBlank {
-            u.substringBefore("/").substringBefore("?").trim().trim('[', ']')
-        }
-        val isLocal = isLocalHost(host) || u.contains(":8096") || u.contains(":8920")
-        val resolved = if (isLocal) "http" else "https"
-        val withoutScheme = if (hasScheme) u.substringAfter("://") else u
-        return "$resolved://$withoutScheme"
-    }
-
-    private fun authHeader(deviceId: String, token: String): String =
-        "MediaBrowser Client=\"$CLIENT_NAME\", Device=\"$DEVICE_NAME\", DeviceId=\"$deviceId\", Version=\"$CLIENT_VERSION\"" +
-            if (token.isNotBlank()) ", Token=\"$token\"" else ""
+    override fun getImageUrl(serverUrl: String, itemId: String, isBackdrop: Boolean): String =
+        Companion.getImageUrl(serverUrl, itemId, isBackdrop)
 
     private suspend fun buildAuthHeader(token: String = ""): String = authHeader(deviceId(), token)
 
-    override fun getStreamUrl(config: JellyfinConfig, itemId: String, mediaSourceId: String?): String {
-        val server = cleanUrl(config.serverUrl)
-        val params = buildList {
-            add("static=true")
-            if (config.accessToken.isNotBlank()) add("api_key=${URLEncoder.encode(config.accessToken, "UTF-8")}")
-            if (config.userId.isNotBlank()) add("userId=${URLEncoder.encode(config.userId, "UTF-8")}")
-            if (!mediaSourceId.isNullOrBlank()) add("MediaSourceId=${URLEncoder.encode(mediaSourceId, "UTF-8")}")
-        }.joinToString("&")
-        return "$server/Videos/$itemId/stream?$params"
-    }
+    companion object {
+        private const val CLIENT_NAME = "AbyssLauncher"
+        private const val DEVICE_NAME = "Android TV"
+        private const val CLIENT_VERSION = "2.0.0"
 
-    override fun sanitizeStreamUrl(streamUrl: String, config: JellyfinConfig, mediaSourceId: String?): String {
-        if (streamUrl.isBlank()) return streamUrl
-        var url = streamUrl.trim()
-        fun appendParam(name: String, value: String) {
-            if (url.contains("$name=")) return
-            val enc = URLEncoder.encode(value, "UTF-8")
-            url += (if ("?" in url) "&" else "?") + "$name=$enc"
+        private fun isLocalHost(host: String): Boolean {
+            if (host.equals("localhost", ignoreCase = true)) return true
+            if (host.contains(":")) {
+                val h = host.lowercase(Locale.ROOT)
+                return h == "::1" || h == "0:0:0:0:0:0:0:1" ||
+                    h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd")
+            }
+            val parts = host.split(".")
+            if (parts.size != 4) return false
+            val a = parts[0].toIntOrNull() ?: return false
+            val b = parts[1].toIntOrNull() ?: return false
+            return a == 10 || a == 127 || (a == 192 && b == 168) ||
+                (a == 172 && b in 16..31) || (a == 169 && b == 254) || (a == 0 && b == 0)
         }
-        if (config.accessToken.isNotBlank()) {
-            val enc = URLEncoder.encode(config.accessToken, "UTF-8")
-            val apiKeyRegex = Regex("([?&])api_key=[^&]*")
-            url = if (apiKeyRegex.containsMatchIn(url)) {
-                apiKeyRegex.replace(url) { "${it.groupValues[1]}api_key=$enc" }
+
+        fun cleanUrl(raw: String): String {
+            val u = raw.trim().trimEnd('/')
+            if (u.isBlank()) return u
+
+            val hasScheme = u.contains("://")
+            val scheme = u.substringBefore("://").lowercase(Locale.ROOT).takeIf { hasScheme }
+            if (hasScheme && (scheme == "http" || scheme == "https")) return u
+
+            val probe = if (hasScheme) u else "http://$u"
+            val host = runCatching { java.net.URI.create(probe).host }.getOrNull().orEmpty().ifBlank {
+                u.substringBefore("/").substringBefore("?").trim().trim('[', ']')
+            }
+            val isLocal = isLocalHost(host) || u.contains(":8096") || u.contains(":8920")
+            val resolved = if (isLocal) "http" else "https"
+            val withoutScheme = if (hasScheme) u.substringAfter("://") else u
+            return "$resolved://$withoutScheme"
+        }
+
+        private fun authHeader(deviceId: String, token: String): String =
+            "MediaBrowser Client=\"$CLIENT_NAME\", Device=\"$DEVICE_NAME\", DeviceId=\"$deviceId\", Version=\"$CLIENT_VERSION\"" +
+                if (token.isNotBlank()) ", Token=\"$token\"" else ""
+
+        fun getStreamUrl(config: JellyfinConfig, itemId: String, mediaSourceId: String? = null): String {
+            val server = cleanUrl(config.serverUrl)
+            val params = buildList {
+                add("static=true")
+                if (config.accessToken.isNotBlank()) add("api_key=${URLEncoder.encode(config.accessToken, "UTF-8")}")
+                if (config.userId.isNotBlank()) add("userId=${URLEncoder.encode(config.userId, "UTF-8")}")
+                if (!mediaSourceId.isNullOrBlank()) add("MediaSourceId=${URLEncoder.encode(mediaSourceId, "UTF-8")}")
+            }.joinToString("&")
+            return "$server/Videos/$itemId/stream?$params"
+        }
+
+        fun sanitizeStreamUrl(streamUrl: String, config: JellyfinConfig, mediaSourceId: String? = null): String {
+            if (streamUrl.isBlank()) return streamUrl
+            var url = streamUrl.trim()
+            fun appendParam(name: String, value: String) {
+                if (url.contains("$name=")) return
+                val enc = URLEncoder.encode(value, "UTF-8")
+                url += (if ("?" in url) "&" else "?") + "$name=$enc"
+            }
+            if (config.accessToken.isNotBlank()) {
+                val enc = URLEncoder.encode(config.accessToken, "UTF-8")
+                val apiKeyRegex = Regex("([?&])api_key=[^&]*")
+                url = if (apiKeyRegex.containsMatchIn(url)) {
+                    apiKeyRegex.replace(url) { "${it.groupValues[1]}api_key=$enc" }
+                } else {
+                    url + (if ("?" in url) "&" else "?") + "api_key=$enc"
+                }
+            }
+            if (config.userId.isNotBlank()) appendParam("userId", config.userId)
+            if (!mediaSourceId.isNullOrBlank()) appendParam("MediaSourceId", mediaSourceId)
+            return url
+        }
+
+        fun getImageUrl(serverUrl: String, itemId: String, isBackdrop: Boolean = false): String {
+            val server = cleanUrl(serverUrl)
+            if (server.isBlank() || itemId.isBlank()) return ""
+            return if (isBackdrop) {
+                "$server/Items/$itemId/Images/Backdrop/0?fillWidth=1280&quality=85"
             } else {
-                url + (if ("?" in url) "&" else "?") + "api_key=$enc"
+                "$server/Items/$itemId/Images/Primary?fillWidth=400&quality=90"
             }
         }
-        if (config.userId.isNotBlank()) appendParam("userId", config.userId)
-        if (!mediaSourceId.isNullOrBlank()) appendParam("MediaSourceId", mediaSourceId)
-        return url
-    }
 
-    override fun getImageUrl(serverUrl: String, itemId: String, isBackdrop: Boolean): String {
-        val server = cleanUrl(serverUrl)
-        if (server.isBlank() || itemId.isBlank()) return ""
-        return if (isBackdrop) {
-            "$server/Items/$itemId/Images/Backdrop/0?fillWidth=1280&quality=85"
-        } else {
-            "$server/Items/$itemId/Images/Primary?fillWidth=400&quality=90"
+        fun buildWebSocketUrl(config: JellyfinConfig, deviceId: String = "Abyss-TV-Player"): String? {
+            val server = cleanUrl(config.serverUrl)
+            val token = config.accessToken
+            if (server.isBlank() || token.isBlank()) return null
+            val wsBase = when {
+                server.startsWith("https://", ignoreCase = true) -> "wss://${server.substring(8)}"
+                server.startsWith("http://", ignoreCase = true) -> "ws://${server.substring(7)}"
+                else -> return null
+            }
+            val encDeviceId = URLEncoder.encode(deviceId, "UTF-8")
+            return "$wsBase/socket?deviceId=$encDeviceId"
         }
     }
 
@@ -1010,7 +1035,7 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
         }
 
         if (trailerUrl.isBlank() && movieItem.tmdbId != null) {
-            val tmdbTrailer = TmdbRepository.fetchMovieTrailer(movieItem.tmdbId)
+            val tmdbTrailer = tmdbRepository.fetchMovieTrailer(movieItem.tmdbId)
             if (tmdbTrailer != null) {
                 trailerUrl = tmdbTrailer.first
                 trailerName = tmdbTrailer.second
@@ -1246,18 +1271,8 @@ object JellyfinRepository : IJellyfinRepository, KoinComponent {
 
     override fun buildAuthHeaderValue(token: String): String = authHeader(resolveDeviceId(), token)
 
-    override fun buildWebSocketUrl(config: JellyfinConfig): String? {
-        val server = cleanUrl(config.serverUrl)
-        val token = config.accessToken
-        if (server.isBlank() || token.isBlank()) return null
-        val wsBase = when {
-            server.startsWith("https://", ignoreCase = true) -> "wss://${server.substring(8)}"
-            server.startsWith("http://", ignoreCase = true) -> "ws://${server.substring(7)}"
-            else -> return null
-        }
-        val encDeviceId = URLEncoder.encode(resolveDeviceId(), "UTF-8")
-        return "$wsBase/socket?deviceId=$encDeviceId"
-    }
+    override fun buildWebSocketUrl(config: JellyfinConfig): String? =
+        Companion.buildWebSocketUrl(config, resolveDeviceId())
 
     override suspend fun reportCapabilities(config: JellyfinConfig): Boolean = withContext(Dispatchers.IO) {
         val server = cleanUrl(config.serverUrl)
