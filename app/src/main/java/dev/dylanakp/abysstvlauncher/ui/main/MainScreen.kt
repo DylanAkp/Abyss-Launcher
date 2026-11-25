@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +32,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -82,6 +84,7 @@ import dev.dylanakp.abysstvlauncher.ui.components.SettingsDrawer
 import dev.dylanakp.abysstvlauncher.ui.focus.FocusSlotHolder
 import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
 import dev.dylanakp.abysstvlauncher.ui.focus.safeRequestFocus
+import dev.dylanakp.abysstvlauncher.ui.focus.tvClickable
 import dev.dylanakp.abysstvlauncher.ui.player.AbyssPlayerScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -435,6 +438,30 @@ fun MainScreen(
             context = context,
             playMediaItem = playMediaItem
         )
+        }
+    }
+}
+
+@Composable
+fun PlaybackPreparingOverlay(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xD905060A))
+            .focusGroup()
+            .tvClickable(isBusy = true, onFocused = {}) { },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            CircularProgressIndicator(color = Color(0xFF7C5CFF))
+            Text(
+                text = stringResource(R.string.player_preparing),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AbyssTextPrimary
+            )
         }
     }
 }

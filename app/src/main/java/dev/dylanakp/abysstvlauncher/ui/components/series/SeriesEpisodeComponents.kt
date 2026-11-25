@@ -45,7 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
-import dev.dylanakp.abysstvlauncher.theme.AbyssGold
+import dev.dylanakp.abysstvlauncher.theme.AbyssColorAccent
 import dev.dylanakp.abysstvlauncher.theme.AbyssPillGlass
 import dev.dylanakp.abysstvlauncher.theme.AbyssSurfaceGlass
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
@@ -79,6 +79,7 @@ fun DetailedEpisodeCard(
         savedPositionMs > 0L -> 0.03f
         else -> 0f
     }
+    val isWatched = effectiveProgress >= 0.95f
 
     Box(
         modifier = modifier
@@ -145,6 +146,20 @@ fun DetailedEpisodeCard(
                     modifier = Modifier.fillMaxSize()
                 )
 
+                if (isWatched) {
+                    Box(modifier = Modifier.fillMaxSize().background(Color(0x99000000)))
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color(0x33000000)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AbyssIcon(type = AbyssIconType.CHECK, color = Color.White, size = 18.dp)
+                    }
+                }
+
                 Box(
                     modifier = Modifier
                         .padding(6.dp)
@@ -163,38 +178,7 @@ fun DetailedEpisodeCard(
                     )
                 }
 
-                if (effectiveProgress >= 0.95f) {
-                    Box(
-                        modifier = Modifier
-                            .padding(6.dp)
-                            .align(Alignment.TopEnd)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xDD000000))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            AbyssIcon(
-                                type = AbyssIconType.CHECK,
-                                color = AbyssGold,
-                                size = 9.dp
-                            )
-                            Text(
-                                text = stringResource(R.string.badge_watched_caps),
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 8.sp,
-                                    letterSpacing = 0.5.sp
-                                ),
-                                color = AbyssGold
-                            )
-                        }
-                    }
-                }
-
-                if (isFocused) {
+                if (isFocused && !isWatched) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -211,7 +195,7 @@ fun DetailedEpisodeCard(
                     }
                 }
 
-                if (effectiveProgress > 0f) {
+                if (effectiveProgress > 0f && !isWatched) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -223,7 +207,7 @@ fun DetailedEpisodeCard(
                             modifier = Modifier
                                 .fillMaxHeight()
                                 .fillMaxWidth(effectiveProgress.coerceAtLeast(0.03f))
-                                .background(AbyssGold)
+                                .background(AbyssColorAccent)
                         )
                     }
                 }
@@ -261,27 +245,8 @@ fun DetailedEpisodeCard(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp
                                 ),
-                                color = if (isFocused) Color.Black else AbyssGold
+                                color = if (isFocused) Color.Black else AbyssColorAccent
                             )
-                        } else if (effectiveProgress >= 0.95f) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                AbyssIcon(
-                                    type = AbyssIconType.CHECK,
-                                    color = if (isFocused) Color.Black else AbyssGold,
-                                    size = 11.dp
-                                )
-                                Text(
-                                    text = stringResource(R.string.badge_watched),
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp
-                                    ),
-                                    color = if (isFocused) Color.Black else AbyssGold
-                                )
-                            }
                         }
 
                         if (episode.duration.isNotBlank()) {
@@ -333,7 +298,7 @@ fun DetailedEpisodeCard(
                                     .fillMaxHeight()
                                     .fillMaxWidth(effectiveProgress.coerceAtLeast(0.03f))
                                     .clip(RoundedCornerShape(50))
-                                    .background(if (isFocused) Color(0xFFB45309) else AbyssGold)
+                                    .background(if (isFocused) Color(0xFFC7DBFF) else AbyssColorAccent)
                             )
                         }
                         Text(
@@ -342,7 +307,7 @@ fun DetailedEpisodeCard(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp
                             ),
-                            color = if (isFocused) Color(0xFFB45309) else AbyssGold
+                            color = if (isFocused) Color(0xFFC7DBFF) else AbyssColorAccent
                         )
                     }
                 }

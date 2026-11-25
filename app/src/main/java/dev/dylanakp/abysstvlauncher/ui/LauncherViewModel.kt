@@ -100,6 +100,7 @@ data class LauncherUiState(
 
     // Built-in Player, Movie & Series Detail state
     val activePlayerSession: PlayerSession? = null,
+    val isPreparingPlayback: Boolean = false,
     val selectedMovieForDetails: MediaItem? = null,
     val activeMovieDetails: dev.dylanakp.abysstvlauncher.model.MovieDetails? = null,
     val isLoadingMovieDetails: Boolean = false,
@@ -586,7 +587,9 @@ class LauncherViewModel(
             if (launched) return
         }
 
+        _uiState.update { it.copy(isPreparingPlayback = true) }
         viewModelScope.launch(Dispatchers.IO) {
+            try {
             val savedEntry = playbackHistoryRepository.getEntry(context, safeItem.id)
             val savedPos = if (savedEntry != null && savedEntry.progressPercent < 0.95f) {
                 savedEntry.positionMs
@@ -627,6 +630,9 @@ class LauncherViewModel(
                     series = applyHistoryToItems(current.series, updatedHistory),
                     playbackHistory = updatedHistory
                 )
+            }
+            } finally {
+                _uiState.update { it.copy(isPreparingPlayback = false) }
             }
         }
     }
@@ -851,7 +857,9 @@ class LauncherViewModel(
             nextEpisode = nextEpisode
         )
 
+        _uiState.update { it.copy(isPreparingPlayback = true) }
         viewModelScope.launch(Dispatchers.IO) {
+            try {
             runCatching { jellyfinRepository.preparePlayback(config, safeEpisode.id) }
             runCatching { jellyfinRepository.reportPlaybackStart(config, safeEpisode.id, startPositionMs) }
 
@@ -880,6 +888,9 @@ class LauncherViewModel(
                     series = applyHistoryToItems(current.series, updatedHistory),
                     playbackHistory = updatedHistory
                 )
+            }
+            } finally {
+                _uiState.update { it.copy(isPreparingPlayback = false) }
             }
         }
     }

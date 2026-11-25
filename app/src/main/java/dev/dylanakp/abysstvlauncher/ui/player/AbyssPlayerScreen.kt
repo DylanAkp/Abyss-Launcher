@@ -87,7 +87,7 @@ import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderFocus
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
-import dev.dylanakp.abysstvlauncher.theme.AbyssGold
+import dev.dylanakp.abysstvlauncher.theme.AbyssColorAccent
 import dev.dylanakp.abysstvlauncher.theme.AbyssPillGlass
 import dev.dylanakp.abysstvlauncher.theme.AbyssSurfaceGlassElevated
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary

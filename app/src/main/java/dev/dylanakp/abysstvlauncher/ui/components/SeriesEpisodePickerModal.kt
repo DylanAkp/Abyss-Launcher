@@ -78,7 +78,8 @@ import dev.dylanakp.abysstvlauncher.model.SeriesEpisode
 import dev.dylanakp.abysstvlauncher.model.SeriesSeason
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderFocus
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
-import dev.dylanakp.abysstvlauncher.theme.AbyssGold
+import dev.dylanakp.abysstvlauncher.theme.AbyssColorAccent
+import dev.dylanakp.abysstvlauncher.theme.AbyssColorRating
 import dev.dylanakp.abysstvlauncher.theme.AbyssPillGlass
 import dev.dylanakp.abysstvlauncher.theme.AbyssSurfaceGlass
 import dev.dylanakp.abysstvlauncher.theme.AbyssSurfaceGlassElevated
@@ -325,7 +326,7 @@ fun SeriesDetailScreen(
                                 ) {
                                     AbyssIcon(
                                         type = AbyssIconType.STAR_FILLED,
-                                        color = AbyssGold,
+                                        color = AbyssColorRating,
                                         size = 10.dp
                                     )
                                     Text(
@@ -334,7 +335,7 @@ fun SeriesDetailScreen(
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 10.sp
                                         ),
-                                        color = AbyssGold
+                                        color = AbyssColorRating
                                     )
                                 }
                             }
@@ -509,7 +510,7 @@ fun SeriesDetailScreen(
                                                         .fillMaxHeight()
                                                         .fillMaxWidth(seasonFraction)
                                                         .clip(RoundedCornerShape(50))
-                                                        .background(AbyssGold)
+                                                        .background(AbyssColorAccent)
                                                 )
                                             }
                                         }
@@ -519,7 +520,7 @@ fun SeriesDetailScreen(
                                                 fontWeight = FontWeight.SemiBold,
                                                 fontSize = 10.sp
                                             ),
-                                            color = if (watchedInSeason > 0) AbyssGold else AbyssTextMuted
+                                            color = if (watchedInSeason > 0) AbyssColorAccent else AbyssTextMuted
                                         )
                                     }
                                 }

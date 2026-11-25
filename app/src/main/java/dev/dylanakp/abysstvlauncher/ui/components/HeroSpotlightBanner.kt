@@ -49,7 +49,7 @@ import dev.dylanakp.abysstvlauncher.R
 import dev.dylanakp.abysstvlauncher.model.MediaCategory
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
-import dev.dylanakp.abysstvlauncher.theme.AbyssGold
+import dev.dylanakp.abysstvlauncher.theme.AbyssColorAccent
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextMuted
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
@@ -165,7 +165,7 @@ fun HeroSpotlightContent(
                 letterSpacing = 2.sp,
                 fontSize = 10.sp
             ),
-            color = if (isResume) AbyssGold else AbyssTextSecondary
+            color = if (isResume) AbyssColorAccent else AbyssTextSecondary
         )
 
         Spacer(modifier = Modifier.height(6.dp))

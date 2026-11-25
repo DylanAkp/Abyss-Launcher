@@ -32,7 +32,7 @@ fun AbyssTVLauncherTheme(
     val colorScheme = darkColorScheme(
         primary = Color(0xFFF5F5F7),       // Abyss near-white accent (--abyss-accent)
         secondary = Color(0xFF8E9BAE),
-        tertiary = AbyssGold,
+        tertiary = AbyssColorAccent,
         background = AbyssVoid,
         surface = AbyssObsidian,
         surfaceVariant = AbyssSurfaceGlass,

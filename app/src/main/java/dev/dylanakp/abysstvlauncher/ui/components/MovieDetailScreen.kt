@@ -52,7 +52,7 @@ import dev.dylanakp.abysstvlauncher.model.MediaVersion
 import dev.dylanakp.abysstvlauncher.model.MovieDetails
 import dev.dylanakp.abysstvlauncher.model.PlaybackHistoryEntry
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
-import dev.dylanakp.abysstvlauncher.theme.AbyssGold
+import dev.dylanakp.abysstvlauncher.theme.AbyssColorRating
 import dev.dylanakp.abysstvlauncher.theme.AbyssSurfaceGlassElevated
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
@@ -209,7 +209,7 @@ fun MovieDetailScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (movieItem.rating.isNotBlank() && movieItem.rating != "0" && movieItem.rating != "0.0") {
-                        MovieMetaBadge(text = "★ ${movieItem.rating}", textColor = AbyssGold, bgColor = Color(0x33F59E0B))
+                        MovieMetaBadge(text = "★ ${movieItem.rating}", textColor = AbyssColorRating, bgColor = Color(0x33F59E0B))
                     }
                     if (movieItem.year.isNotBlank()) {
                         MovieMetaBadge(text = movieItem.year)

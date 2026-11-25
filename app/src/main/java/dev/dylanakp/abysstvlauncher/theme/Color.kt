@@ -17,4 +17,5 @@ val AbyssTextSecondary = Color(0xFF8E9BAE)
 val AbyssTextMuted = Color(0xFF556070)
 
 val AbyssAccentMuted = Color(0xFFE2E8F0)
-val AbyssGold = Color(0xFFEAB308)
+val AbyssColorAccent = Color(0xFFB7CBE8)
+val AbyssColorRating = Color(0xFFEAB308)

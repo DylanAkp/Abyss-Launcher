@@ -40,6 +40,7 @@ import dev.dylanakp.abysstvlauncher.ui.components.JellyfinMessageOverlay
 import dev.dylanakp.abysstvlauncher.ui.focus.LocalFocusSlots
 import dev.dylanakp.abysstvlauncher.ui.focus.rememberFocusSlotHolder
 import dev.dylanakp.abysstvlauncher.ui.main.MainScreen
+import dev.dylanakp.abysstvlauncher.ui.main.PlaybackPreparingOverlay
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
@@ -130,6 +131,9 @@ class MainActivity : ComponentActivity() {
                     ) {
                         Box(modifier = Modifier.fillMaxSize()) {
                             MainScreen(viewModel = viewModel)
+                            if (uiState.isPreparingPlayback) {
+                                PlaybackPreparingOverlay(modifier = Modifier.matchParentSize())
+                            }
                             JellyfinMessageOverlay(
                                 message = uiState.jellyfinDisplayMessage,
                                 onDismiss = { viewModel.dismissJellyfinDisplayMessage() },

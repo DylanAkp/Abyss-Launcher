@@ -316,4 +316,5 @@
     <string name="seer_untitled_movie">Film #%1$d</string>
     <string name="seer_request_success">Demande envoyée avec succès sur Seer !</string>
     <string name="seer_request_error">Erreur Seer (%1$d) : %2$s</string>
+    <string name="player_preparing">Préparation de la lecture…</string>
 </resources>

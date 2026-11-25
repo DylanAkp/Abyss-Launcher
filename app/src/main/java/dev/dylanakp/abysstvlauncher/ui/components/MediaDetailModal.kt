@@ -43,7 +43,7 @@ import dev.dylanakp.abysstvlauncher.model.MediaCategory
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.SeerMediaStatus
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
-import dev.dylanakp.abysstvlauncher.theme.AbyssGold
+import dev.dylanakp.abysstvlauncher.theme.AbyssColorRating
 import dev.dylanakp.abysstvlauncher.theme.AbyssSurfaceGlassElevated
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
@@ -179,7 +179,7 @@ fun MediaDetailModal(
                                     Text(
                                         text = "★ ${item.rating}",
                                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = AbyssGold
+                                        color = AbyssColorRating
                                     )
                                 }
                                 if (item.year.isNotBlank()) {

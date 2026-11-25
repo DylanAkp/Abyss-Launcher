@@ -52,7 +52,7 @@ import dev.dylanakp.abysstvlauncher.model.MediaCategory
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.model.PlaybackHistoryEntry
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
-import dev.dylanakp.abysstvlauncher.theme.AbyssGold
+import dev.dylanakp.abysstvlauncher.theme.AbyssColorAccent
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.ui.focus.FocusSlotHolder
@@ -219,7 +219,7 @@ fun MediaContextMenu(
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 11.sp
                                         ),
-                                        color = AbyssGold
+                                        color = AbyssColorAccent
                                     )
                                 }
                             }

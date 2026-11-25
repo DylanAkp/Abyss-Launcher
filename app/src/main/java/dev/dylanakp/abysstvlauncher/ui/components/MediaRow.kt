@@ -59,7 +59,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dylanakp.abysstvlauncher.model.MediaItem
 import dev.dylanakp.abysstvlauncher.theme.AbyssBorderHairline
-import dev.dylanakp.abysstvlauncher.theme.AbyssGold
+import dev.dylanakp.abysstvlauncher.theme.AbyssColorAccent
+import dev.dylanakp.abysstvlauncher.theme.AbyssColorRating
 import dev.dylanakp.abysstvlauncher.theme.AbyssSurfaceGlass
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
@@ -328,12 +329,12 @@ fun MediaPosterCard(
                             text = "★",
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold,
-                            color = AbyssGold
+                            color = AbyssColorRating
                         )
                         Text(
                             text = item.rating,
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                            color = AbyssGold
+                            color = AbyssColorRating
                         )
                     }
                 }
@@ -367,7 +368,7 @@ fun MediaPosterCard(
                             modifier = Modifier
                                 .fillMaxHeight()
                                 .fillMaxWidth(item.progressPercent.coerceIn(0.02f, 1f))
-                                .background(AbyssGold)
+                                .background(AbyssColorAccent)
                         )
                     }
                 }

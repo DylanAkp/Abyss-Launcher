@@ -39,7 +39,7 @@ import dev.dylanakp.abysstvlauncher.player.PlayerPositionState
 import dev.dylanakp.abysstvlauncher.player.TrackOption
 import kotlinx.coroutines.flow.StateFlow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.dylanakp.abysstvlauncher.theme.AbyssGold
+import dev.dylanakp.abysstvlauncher.theme.AbyssColorAccent
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextPrimary
 import dev.dylanakp.abysstvlauncher.theme.AbyssTextSecondary
 import dev.dylanakp.abysstvlauncher.theme.AbyssVoid
@@ -178,7 +178,7 @@ fun PlayerOsdOverlay(
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 12.sp
                             ),
-                            color = AbyssGold
+                            color = AbyssColorAccent
                         )
                     }
                 }
@@ -311,7 +311,7 @@ fun PlayerOsdOverlay(
                             modifier = Modifier
                                 .fillMaxHeight()
                                 .fillMaxWidth(progressFraction)
-                                .background(if (seekBarFocused) AbyssGold else Color.White)
+                                .background(if (seekBarFocused) AbyssColorAccent else Color.White)
                         )
                     }
                 }
